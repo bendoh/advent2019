@@ -1,12 +1,18 @@
+#include <stdio.h>
 #include <iostream>
 #include <string>
 #include <list>
 #include <vector>
 #include <regex>
+#include <cstdlib>
 
 using namespace std;
 
 list<std::string> input_lines;
+bool is_interactive = false;
+bool is_visual = false;
+
+FILE *terminal;
 
 int32_t fuel_required_for_mass(uint32_t mass) {
   return mass / 3 - 2;
@@ -41,7 +47,11 @@ void day1() {
       fuel_for_fuel = fuel_step;
       fuel_step = fuel_required_for_mass(fuel_step);
     }
-    std::cout << mass << ": total fuel required: " << total_fuel_required << "\n";
+    std::cout <<
+      "Mass=" << mass <<
+      "; fuel required for mass: " << fuel_for_mass <<
+      "; fuel required for fuel: " << fuel_for_fuel <<
+      "\n";
 
     total_fuel_part2 += fuel_for_mass + fuel_for_fuel;
   }
@@ -51,10 +61,58 @@ void day1() {
 }
 
 void print_program(vector<uint32_t> program) {
+  cout << "\033[2J";
+  cout << "\033[H";
+  for(uint32_t i = 0; i < 8; i++) {
+    printf("%8d  ", i);
+  }
   for(uint32_t i = 0; i < program.size(); i++) {
-    cout << "[" << to_string(i) << "] " << to_string (program[i]) << "  ";
+    if (i % 8 == 0)
+      cout << "\n";
+    printf("%8d  ", program[i]);
   }
   cout << "\n";
+}
+
+
+/** Day2 **/
+uint32_t day2_intcode_processor(vector<uint32_t> program) {
+  uint32_t opcode = 0;
+  uint32_t pc = 0;
+  string input;
+
+  while(opcode != 99) {
+    if (is_visual || is_interactive) {
+      print_program(program);
+    }
+
+    if (is_interactive) {
+      fgetc(terminal);
+    }
+
+    opcode = program[pc];
+
+    pc++;
+
+    if(opcode == 1) { // Addition
+      uint32_t arg1 = program[program[pc++]];
+      uint32_t arg2 = program[program[pc++]];
+      uint32_t dest = program[pc++];
+      program[dest] = arg1 + arg2;
+    }
+
+    if(opcode == 2) { // Multiplication
+      uint32_t arg1 = program[program[pc++]];
+      uint32_t arg2 = program[program[pc++]];
+      uint32_t dest = program[pc++];
+      program[dest] = arg1 * arg2;
+    }
+
+
+    opcode = program[pc];
+  }
+
+  return program[0];
 }
 
 void day2() {
@@ -64,55 +122,65 @@ void day2() {
     vector<string> line_opcodes = regex_split(line, ",");
 
     for (auto &opcode : line_opcodes) {
-      program.push_back(stoi(opcode));
+      program_template.push_back(stoi(opcode));
     }
   }
 
-  uint32_t noun = 0;
-  uint32_t verb = 0;
+  uint32_t noun = 12;
+  uint32_t verb = 2;
 
-  uint32_t opcode = 0;
-  uint32_t pc = 0;
+  vector<uint32_t> program = program_template;
+  program[1] = noun;
+  program[2] = verb;
 
-  while(opcode != 99) {
-    print_program(program);
-    opcode = program[pc];
+  uint32_t part1_result = day2_intcode_processor(program);
 
-    cout << "PC: " << to_string(pc) << " opcode: " << to_string(opcode) << "\n";
+  printf("With noun=12 & verb=2: %i\n", part1_result);
 
-    pc++;
+  uint32_t part2_search = 19690720;
 
-    if(opcode == 1) { // Addition
-      uint32_t arg1 = program[program[pc++]];
-      uint32_t arg2 = program[program[pc++]];
-      uint32_t dest = program[pc++];
+  for (noun = 0; noun < 99; noun++) {
+    for (verb = 0; verb < 99; verb++) {
+      program = program_template;
+      program[1] = noun;
+      program[2] = verb;
+      uint32_t result = day2_intcode_processor(program);
 
-      cout << "ADD: " << to_string(arg1) << " + " << to_string(arg2) << " = " << to_string(arg1+arg2) << " -> " << to_string(dest) << "\n";
-      program[dest] = arg1 + arg2;
+      if (is_visual)
+        printf("(%d, %d) = %d\n", noun, verb, result);
+
+      if (result == part2_search) {
+        printf("Found %d! %d * 100 + %d = %d\n", part2_search, noun, verb, noun * 100 + verb);
+        return;
+      }
     }
-
-    if(opcode == 2) { // Multiplication, 3 args
-      uint32_t arg1 = program[program[pc++]];
-      uint32_t arg2 = program[program[pc++]];
-      uint32_t dest = program[pc++];
-
-      cout << "MULTIPLY: " << to_string(arg1) << " * " << to_string(arg2) << " = " << to_string(arg1*arg2) << " -> " << to_string(dest) << "\n";
-      program[dest] = arg1 * arg2;
-    }
-
-
-    opcode = program[pc];
   }
-  print_program(program);
 }
 
 int main(const int argc, const char **argv) {
   string line;
-  vector<void(*)(part)> days;
+  vector<void(*)()> days;
 
   days.push_back(day0);
   days.push_back(day1);
   days.push_back(day2);
+
+  if (strcmp(getenv("AOC_INTERACTIVE"), "ON") == 0) {
+    is_interactive = true;
+    cout << "Doing these interactively! Enjoy...\n";
+    terminal = fopen("/dev/tty", "r");
+
+    if (!terminal) {
+      cout << "Couldn't open terminal! Why?\n";
+      return 1;
+    }
+  }
+
+  const char *env_visual = getenv("AOC_VISUAL");
+
+  if (env_visual != NULL && strcmp(env_visual, "ON") == 0) {
+    is_visual = true;
+  }
 
   while (std::cin >> line)
     input_lines.push_back(line);
