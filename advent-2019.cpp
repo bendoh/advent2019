@@ -128,28 +128,38 @@ public:
   }
 
   /** Day2 **/
-  void print_program(vector<uint32_t> program) {
+  void print_program(vector<int32_t> program, uint32_t pc) {
     cout << "\033[2J";
-    cout << "\033[H";
+    cout << "\033[H\033[7m         ";
     for(uint32_t i = 0; i < 8; i++) {
-      printf("%8d  ", i);
+      printf("%02x        ", i);
     }
+    cout << "\033[0m";
     for(uint32_t i = 0; i < program.size(); i++) {
-      if (i % 8 == 0)
+      if (i % 8 == 0) {
         cout << "\n";
-      printf("%8d  ", program[i]);
+        printf("\033[7m%02x\033[0m ", i);
+      }
+
+      if (i == pc) {
+        printf("\033[5m%8d\033[0m  ", program[i]);
+      }
+      else {
+        printf("%8d  ", program[i]);
+      }
     }
-    cout << "\n";
+    printf("\nPC is at %d\n", pc);
+
   }
 
-  uint32_t day2_intcode_processor(vector<uint32_t> program) {
+  uint32_t day2_intcode_processor(vector<int32_t> program) {
     uint32_t opcode = 0;
     uint32_t pc = 0;
     string input;
 
     while(opcode != 99) {
       if (is_visual || is_interactive) {
-        print_program(program);
+        print_program(program, pc);
       }
 
       if (is_interactive) {
@@ -161,15 +171,15 @@ public:
       pc++;
 
       if(opcode == 1) { // Addition
-        uint32_t arg1 = program[program[pc++]];
-        uint32_t arg2 = program[program[pc++]];
+        int32_t arg1 = program[program[pc++]];
+        int32_t arg2 = program[program[pc++]];
         uint32_t dest = program[pc++];
         program[dest] = arg1 + arg2;
       }
 
       if(opcode == 2) { // Multiplication
-        uint32_t arg1 = program[program[pc++]];
-        uint32_t arg2 = program[program[pc++]];
+        int32_t arg1 = program[program[pc++]];
+        int32_t arg2 = program[program[pc++]];
         uint32_t dest = program[pc++];
         program[dest] = arg1 * arg2;
       }
@@ -182,7 +192,7 @@ public:
   }
 
   string day2() {
-    vector<uint32_t> program_template;
+    vector<int32_t> program_template;
 
     for (auto &line : input_lines) {
       vector<string> line_opcodes = regex_split(line, ",");
@@ -195,11 +205,11 @@ public:
     uint32_t noun = 12;
     uint32_t verb = 2;
 
-    vector<uint32_t> program = program_template;
+    vector<int32_t> program = program_template;
     program[1] = noun;
     program[2] = verb;
 
-    uint32_t result_1 = day2_intcode_processor(program);
+    int32_t result_1 = day2_intcode_processor(program);
     char part1_result[255], part2_result[255];
     snprintf(part1_result, 255, "Part 1: With noun=12 & verb=2: %i", result_1);
     cout << part1_result << "\n";
@@ -211,7 +221,7 @@ public:
         program = program_template;
         program[1] = noun;
         program[2] = verb;
-        uint32_t result_2 = day2_intcode_processor(program);
+        int32_t result_2 = day2_intcode_processor(program);
 
         if (is_visual)
           printf("(%d, %d) = %d\n", noun, verb, result_2);
@@ -493,11 +503,126 @@ public:
 
   }
 
+  int32_t day5_intcode_processor(vector<int32_t> program, int32_t input) {
+    uint32_t opcode = 0;
+    uint32_t pc = 0;
+    int32_t val = 0;
+
+    while(opcode != 99) {
+      if (is_visual || is_interactive) {
+        print_program(program, pc);
+      }
+
+      if (is_interactive) {
+        fgetc(terminal);
+      }
+
+      opcode = program[pc] % 100;
+      uint32_t mode = program[pc] / 100;
+      pc++;
+
+      bool is_immediate[3] = {
+        // Positions 1..N
+        (bool) (mode & 1),
+        (bool) (mode / 10 & 1),
+        (bool) (mode / 100 & 1)
+      };
+
+      if(opcode == 1) { // Addition
+        int32_t arg1 = is_immediate[0] ? program[pc] : program[program[pc]];
+        pc++;
+        int32_t arg2 = is_immediate[1] ? program[pc] : program[program[pc]];
+        pc++;
+        uint32_t dest = program[pc++];
+        program[dest] = arg1 + arg2;
+      }
+
+      else if(opcode == 2) { // Multiplication
+        int32_t arg1 = is_immediate[0] ? program[pc] : program[program[pc]];
+        pc++;
+        int32_t arg2 = is_immediate[1] ? program[pc] : program[program[pc]];
+        pc++;
+        uint32_t dest = program[pc++];
+        program[dest] = arg1 * arg2;
+      }
+
+      else if (opcode == 3) {
+        uint32_t position = program[pc];
+        pc++;
+        program[position] = input;
+      }
+
+      else if (opcode == 4) {
+        uint32_t position = program[pc];
+        pc++;
+        val = program[position];
+        printf("Value at position %d: %d\n", position, val);
+      }
+
+      else if (opcode == 5 || opcode == 6) {
+        int32_t arg1 = is_immediate[0] ? program[pc] : program[program[pc]];
+        pc++;
+        int32_t arg2 = is_immediate[1] ? program[pc] : program[program[pc]];
+        pc++;
+
+        if((opcode == 5 && arg1 != 0) || (opcode == 6 && arg1 == 0)) {
+          pc = arg2;
+        }
+      }
+
+      else if (opcode == 7 || opcode == 8) {
+        int32_t arg1 = is_immediate[0] ? program[pc] : program[program[pc]];
+        pc++;
+        int32_t arg2 = is_immediate[1] ? program[pc] : program[program[pc]];
+        pc++;
+        uint32_t dest = program[pc++];
+        program[dest] = (opcode == 7 && arg1 < arg2) || (opcode == 8 && arg1 == arg2) ? 1 : 0;
+      }
+
+      opcode = program[pc];
+    }
+
+    return val;
+  }
+
+
+  string day5() {
+    vector<int32_t> program_template;
+
+    printf("Parsing lines...\n");
+    for (auto &line : input_lines) {
+      vector<string> line_opcodes = regex_split(line, ",");
+
+      for (auto &opcode : line_opcodes) {
+        program_template.push_back(stoi(opcode));
+      }
+    }
+    printf("Parsed %lu instructions\n", program_template.size());
+
+    vector<int32_t> program = program_template;
+
+    char user_input[10];
+    if (is_interactive) {
+      cout << "Input? ";
+      fscanf(terminal, "%10s", user_input);
+      int32_t result_1 = day5_intcode_processor(program, atoi(user_input));
+
+      return to_string(result_1);
+    } else {
+      int32_t result_1 = day5_intcode_processor(program, 1);
+      int32_t result_2 = day5_intcode_processor(program, 5);
+
+      day_complete = true;
+      return to_string(result_1) + "\n" + to_string(result_2);
+    }
+  }
+
+
   vector<string(Advent2019::*)()> days;
 
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
-    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4
+    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5
   } {
     daynum = _daynum;
 
@@ -571,7 +696,6 @@ public:
       Clear(olc::BLACK);
 
       if (starting_day) {
-
         cout << "Day " << to_string(currentDay) << " started\n";
         // Day is started, start computing next frame
         starting_day = false;
