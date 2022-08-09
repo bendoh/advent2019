@@ -37,7 +37,14 @@ std::vector<std::string> regex_split(const std::string str, const std::string re
 }
 
 
+const char *trim_ws = " \t\n\r\f\v";
 
+// trim from end of string (right)
+inline std::string& rtrim(std::string& s, const char* t = trim_ws)
+{
+    s.erase(s.find_last_not_of(t) + 1);
+    return s;
+}
 
 
 /** Day 3! **/
@@ -49,10 +56,12 @@ struct Point {
   int32_t manhattan_distance() { return abs(x) + abs(y) + abs(z); }
 };
 
+
 struct Intersection {
   Point point = { 0, 0 };
   uint32_t distance = 0;
 };
+
 
 void parse_environment() {
   const char *env_interactive = getenv("AOC_INTERACTIVE");
@@ -617,12 +626,85 @@ public:
     }
   }
 
+  map<string, vector<string>> orbits;
+
+  uint32_t count_orbits(string root, uint32_t depth) {
+    uint32_t count = 0;
+
+    try {
+      vector<string> children = orbits.at(root);
+
+      for (auto &f: children) {
+        cout << "Child of root " << root << ": " << f << "\n";
+        count += depth + count_orbits(f, depth + 1);
+      }
+    }
+    catch (const std::out_of_range& oor) {
+    }
+
+    return count;
+  }
+
+  uint32_t find_distance(string start, string end, uint32_t distance) {
+    try {
+      vector<string> children = orbits.at(start);
+
+      for (auto &f: children) {
+        if (f == end) {
+          return distance;
+        }
+
+        uint32_t c_distance = find_distance(f, end, distance + 1);
+
+        if (c_distance > 0) {
+          return c_distance;
+        }
+      }
+    }
+    catch (const std::out_of_range& oor) {
+    }
+
+    return 0;
+  }
+
+  string day6() {
+    printf("Parsing lines...\n");
+    for (auto &line : input_lines) {
+      rtrim(line);
+      vector<string> r = regex_split(line, "\\)");
+      cout << "Adding " << r[0] << " <- " << r[1] << "\n";
+      orbits[r[0]].push_back(r[1]);
+    }
+
+    uint32_t num_orbits = count_orbits("COM", 1);
+
+    string result = to_string(num_orbits);
+
+    uint32_t min_distance = INT_MAX;
+
+    map<string, vector<string>>::iterator it;
+
+    for (it = orbits.begin(); it != orbits.end(); it++) {
+      uint32_t santa_distance = find_distance(it->first, "SAN", 0);
+      uint32_t you_distance = find_distance(it->first, "YOU", 0);
+
+      if(santa_distance > 0 && you_distance > 0 && santa_distance + you_distance < min_distance) {
+        min_distance = santa_distance + you_distance;
+      }
+    }
+
+    day_complete = true;
+
+    return result + "; distance between SAN and YOU: " + to_string(min_distance);
+  }
 
   vector<string(Advent2019::*)()> days;
 
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
-    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5
+    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
+    &Advent2019::day6
+
   } {
     daynum = _daynum;
 
