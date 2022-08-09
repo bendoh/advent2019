@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <functional>
 #include <algorithm>
+#include <stdlib.h>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine/olcPixelGameEngine.h"
@@ -452,10 +453,38 @@ public:
     }
   }
 
+  string day4() {
+    vector<string> range = regex_split(input_lines[0], "-");
+    vector<string> matches;
+    uint32_t lb = atoi(range[0].c_str()), ub = atoi(range[1].c_str());
+
+    for(uint32_t i = lb; i <= ub; i++) {
+      string s = to_string(i);
+      bool has_double = false;
+      bool no_decrease = true;
+
+      for (uint32_t v = 0; v < s.length() - 1; v++) {
+        if(s[v] == s[v+1]) has_double = true;
+        if(s[v] > s[v+1]) no_decrease = false;
+      }
+
+      if (has_double && no_decrease) {
+        cout << "Match found: " << s << "\n";
+
+        matches.push_back(s);
+      }
+    }
+
+    day_complete = true;
+    return to_string(matches.size());
+
+  }
+
   vector<string(Advent2019::*)()> days;
 
   Advent2019(int8_t _daynum) : days {
-    &Advent2019::day0, &Advent2019::day1, &Advent2019::day2, &Advent2019::day3
+    &Advent2019::day0,
+    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4
   } {
     daynum = _daynum;
 
