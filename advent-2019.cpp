@@ -48,73 +48,10 @@ struct Point {
   int32_t manhattan_distance() { return abs(x) + abs(y) + abs(z); }
 };
 
-struct Segment {
-    Point start, end;
-    int val;
-    bool operator<(const Segment& rhs) const {
-        return val < rhs.val;
-    }
+struct Intersection {
+  Point point = { 0, 0 };
+  uint32_t distance = 0;
 };
-
-bool intersects(const Segment& vertical, const Segment& horizontal) {
-    int y = horizontal.start.y;
-    int x = vertical.start.x;
-    int xub = std::max(horizontal.start.x, horizontal.end.x);
-    int xlb = std::min(horizontal.start.x, horizontal.end.x);
-    int yub = std::max(vertical.start.y, vertical.end.y);
-    int ylb = std::min(vertical.start.y, vertical.end.y);
-    return  x >= xlb && x <= xub &&
-            y >= ylb && y <= yub;
-}
-
-void find_intersections(
-        const std::vector<Segment>& vertical,
-        const std::vector<Segment>& horizontal,
-        std::vector<Point>& intersections
-) {
-    for(Segment s : vertical) {
-        // get interval to iterate over.
-        int lb = std::min(s.start.y, s.end.y);
-        int ub = std::max(s.start.y, s.end.y);
-
-        // find first (smallest) occurance in horizontal
-        int l = 0;
-        int r = horizontal.size()-1;
-        int m;
-        while (l < r) {
-            m = (l + r) / 2;
-            if (horizontal[m].val < lb) {
-                l = m + 1;
-            } else if (horizontal[m].val >= lb) {
-                r = m;
-            }
-        }
-
-        // walk through all horizontal lines within the interval and check for intersections
-        for (int i = m; i < horizontal.size(); i++) {
-            Segment h = horizontal[i];
-            if (s.val > ub)
-                break;
-            if (intersects(s, h)) {
-              printf("segment (%d,%d),(%d,%d),%d intersects (%d,%d),(%d,%d),%d\n",
-                  s.start.x, s.start.y, s.end.x, s.end.y, s.val,
-                  h.start.x, h.start.y, h.end.x, h.end.y, h.val
-                );
-
-              intersections.push_back({s.start.x, horizontal[i].start.y});
-            }
-        }
-    }
-}
-
-template <typename T>
-void ascending(T& dFirst, T& dSecond)
-{
-    if (dFirst > dSecond)
-        std::swap(dFirst, dSecond);
-}
-
-
 
 void parse_environment() {
   const char *env_interactive = getenv("AOC_INTERACTIVE");
@@ -136,7 +73,6 @@ void parse_environment() {
     is_visual = true;
   }
 }
-
 
 
 class Advent2019 : public olc::PixelGameEngine
@@ -291,16 +227,15 @@ public:
     return string(part1_result) + "\n" + string(part2_result);
   }
 
-  const uint16_t day3_speed = 1000;
+  const uint16_t day3_speed = 100;
 
-  void draw_wire(vector<Point> wire, olc::Pixel p, olc::vi2d offset, olc::vf2d scale) {
+  void draw_wire(vector<Point> wire, olc::Pixel p) {
 
     printf("Day time is %f, wire size is %lu\n", day_time, wire.size());
 
     size_t num_segments = max((size_t) 1, min(wire.size() - 1, (size_t) (day_time * day3_speed)));
 
     printf("Drawing %lu segments, first point is (%d, %d)\n", num_segments, wire[0].x, wire[0].y);
-
 
     for(uint32_t i = 0; i < num_segments; i++) {
       olc::vi2d u((wire[i].x - offset.x) / scale.x, (wire[i].y - offset.y) / scale.y);
@@ -315,12 +250,44 @@ public:
     }
   }
 
+  olc::vi2d offset;
+  olc::vf2d scale;
+
+  // Figure out the proper scale and offset to fit the world space
+  // perfectly in our window
+  void fit_world(vector<vector<Point>> wires) {
+    olc::vi2d southwest(0, 0), northeast(0, 0);
+
+    for (auto &wire: wires) {
+      for(uint32_t i = 0; i < wire.size(); i++) {
+        Point u = wire[i];
+
+        if(u.x < southwest.x) southwest.x = u.x;
+        if(u.y < southwest.y) southwest.y = u.y;
+        if(u.x > northeast.x) northeast.x = u.x;
+        if(u.y > northeast.y) northeast.y = u.y;
+      }
+    }
+
+    uint32_t distanceX = (northeast.x - southwest.x),
+             distanceY = (northeast.y - southwest.y);
+
+    // Border in SCREEN space
+    uint16_t border = 10;
+
+    // Scale as separate (X,Y) to conform to whatever screen dimensions we have
+    scale = olc::vf2d(
+      abs((float) distanceX / (float) (ScreenWidth() - border * 2)),
+      abs((float) distanceY / (float) (ScreenHeight() - border * 2))
+    );
+
+    // Offset in WORLD space
+    offset = olc::vi2d(southwest.x - border * scale.y, southwest.y - border * scale.y);
+  }
+
   string day3() {
     vector<vector<Point>> wires;
     int num_wires = input_lines.size();
-
-    vector<Segment> horizontals[num_wires];
-    vector<Segment> verticals[num_wires];
 
     for (uint8_t wire_num = 0; wire_num < num_wires; wire_num++) {
       string line = input_lines[wire_num];
@@ -350,101 +317,44 @@ public:
             break;
         }
 
-        if (dircode == 'U' || dircode == 'D') {
-          verticals[wire_num].push_back({ point, next, next.x });
-        } else {
-          horizontals[wire_num].push_back({ point, next, next.y });
-        }
         points.push_back(next);
         point = next;
       }
 
       wires.push_back(points);
-      sort(horizontals[wire_num].begin(), horizontals[wire_num].end());
-      sort(verticals[wire_num].begin(), verticals[wire_num].end());
     }
-
-    vector<Point> intersections;
-    find_intersections(verticals[1], horizontals[0], intersections);
-    find_intersections(verticals[0], horizontals[1], intersections);
-
-    for (auto &intersection : intersections) {
-      printf("Intersection at (%d, %d)\n", intersection.x, intersection.y);
-    }
-    int min_d = INT_MAX; // something big
-    for (int i = 0; i < intersections.size(); i++) {
-        int d = abs(intersections[i].x) + abs(intersections[i].y);
-        if (d == 0)
-           continue;
-        min_d = (min_d < d) ? min_d : d;
-    }
-    printf("Minimum distance: %d\n", min_d);
 
     // Search for intersections by checking each vertex of wire1
     // for a crossing with wire2
-    list<Point> crossings;
-
-    // For drawing, figure out boundaries of all wires
-    olc::vi2d southwest(0, 0), northeast(0, 0);
-
-    for (auto &wire: wires) {
-      for(uint32_t i = 0; i < wire.size(); i++) {
-        Point u = wire[i];
-
-        if(u.x < southwest.x) southwest.x = u.x;
-        if(u.y < southwest.y) southwest.y = u.y;
-        if(u.x > northeast.x) northeast.x = u.x;
-        if(u.y > northeast.y) northeast.y = u.y;
-      }
-    }
-
-    uint32_t distanceX = (northeast.x - southwest.x),
-             distanceY = (northeast.y - southwest.y);
-
-    // Border in SCREEN space
-    uint16_t border = 10;
-    olc::vf2d scale(
-      abs((float) distanceX / (float) (ScreenWidth() - border * 2)),
-      abs((float) distanceY / (float) (ScreenHeight() - border * 2))
-    );
-
-    // Offset in WORLD space
-    olc::vi2d offset(southwest.x - border * scale.y, southwest.y - border * scale.y);
-
-    printf(
-        "Wire bounds are (%d, %d), (%d, %d) with distances (%d, %d) and scales (%f, %f) screenMin=(%d, %d) screenMax=(%d/%d, %d/%d) with offset (%d, %d)\n",
-        southwest.x, southwest.y,
-        northeast.x, northeast.y,
-        distanceX, distanceY,
-        scale.x, scale.y,
-        (int) ((float)(southwest.x - southwest.x) / scale.x),
-        (int) ((float)(southwest.y - southwest.y) / scale.y),
-        (int) ((float)(northeast.x - southwest.x) / scale.x),
-        ScreenWidth(),
-        (int) ((float)(northeast.y - southwest.y) / scale.y),
-        ScreenHeight(),
-        offset.x, offset.y
-    );
-
-    draw_wire(wires[0], olc::RED, offset, scale);
-    draw_wire(wires[1], olc::BLUE, offset, scale);
+    list<Intersection> crossings;
 
     size_t max_segments = max(wires[0].size(), wires[1].size());
     size_t num_segments = max((size_t) 1, min(max_segments, (size_t) (day_time * day3_speed)));
+
+    fit_world(wires);
+    draw_wire(wires[0], olc::RED);
+    draw_wire(wires[1], olc::BLUE);
+
+    uint32_t distance_a = 0, distance_b = 0;
 
     for(uint32_t i = 0; i < min(num_segments, wires[0].size()) - 1; i++) {
       Point u1 = wires[0][i];
       Point u2 = wires[0][i+1];
 
+      distance_a += abs(u1.x - u2.x) + abs(u1.y - u2.y);
+      distance_b = 0;
+
       for(uint32_t j = 0; j < min(num_segments, wires[1].size()) - 1; j++) {
         Point v1 = wires[1][j];
         Point v2 = wires[1][j+1];
 
+        distance_b += abs(v1.x - v2.x) + abs(v1.y - v2.y);
         if(u1.x == u2.x && v1.y == v2.y) {
           int32_t Ux = u1.x, Vy = v1.y;
-          Point crossing;
-          crossing.x = Ux;
-          crossing.y = Vy;
+          Intersection crossing;
+          crossing.point.x = Ux;
+          crossing.point.y = Vy;
+          crossing.distance = distance_a + distance_b;
 
           int32_t uy1, uy2;
           if(u1.y < u2.y) {
@@ -466,6 +376,7 @@ public:
 
           if (uy1 <= Vy && Vy <= uy2 &&  // U crosses Vy
               vx1 <= Ux && Ux <= vx2) { // V crosses Ux
+            crossing.distance -= abs(u2.y - Vy) + abs(v2.x - Ux);
             DrawCircle((Ux - offset.x) / scale.x, (Vy - offset.y) / scale.y, 5, olc::GREEN);
             crossings.push_back(crossing);
           }
@@ -473,9 +384,10 @@ public:
         else if(u1.y == u2.y && v1.x == v2.x) {
           // U is horizontal, V is vertical
           int32_t Uy = u1.y, Vx = v1.x;
-          Point crossing;
-          crossing.x = Vx;
-          crossing.y = Uy;
+          Intersection crossing;
+          crossing.point.x = Vx;
+          crossing.point.y = Uy;
+          crossing.distance = distance_a + distance_b;
 
           int32_t vy1, vy2;
           if(v1.y < v2.y) {
@@ -497,6 +409,7 @@ public:
 
           if (vy1 < Uy && Uy <= vy2 && // V crosses Uy
               ux1 < Vx && Vx <= ux2) { // U crosses Vx
+            crossing.distance -= abs(u2.x - Vx) + abs(v2.y - Uy);
             DrawCircle((Vx - offset.x) / scale.x, (Uy - offset.y) / scale.y, 5, olc::GREEN);
             crossings.push_back(crossing);
           }
@@ -504,15 +417,22 @@ public:
       }
     }
 
-    Point *nearest = nullptr;
-
+    Intersection *nearest = nullptr;
+    uint32_t fewest_steps = INT_MAX;
     for (auto &crossing: crossings) {
-      if(crossing.x != 0 || crossing.y != 0) {
-        uint32_t distance = crossing.manhattan_distance();
+      if(crossing.point.x != 0 || crossing.point.y != 0) {
+        uint32_t distance = crossing.point.manhattan_distance();
 
-        printf("distance (%d, %d): %d\n", crossing.x, crossing.y, distance);
-        if (nearest == nullptr || distance < nearest->manhattan_distance())
+        printf(
+            "%d, %d: distance=%d, %d steps\n",
+            crossing.point.x, crossing.point.y,
+            distance, crossing.distance
+        );
+        if (nearest == nullptr || distance < nearest->point.manhattan_distance())
           nearest = &crossing;
+
+        if (crossing.distance < fewest_steps)
+          fewest_steps = crossing.distance;
       }
     }
 
@@ -521,9 +441,11 @@ public:
     }
 
     if (nearest != nullptr) {
-      DrawCircle((nearest->x - offset.x) / scale.x, (nearest->y - offset.y) / scale.y, 3, olc::CYAN);
+      FillCircle((nearest->point.x - offset.x) / scale.x, (nearest->point.y - offset.y) / scale.y, 3, olc::CYAN);
 
-      string result = "Nearest: " + to_string(nearest->manhattan_distance());
+      string result =
+        "Nearest: " + to_string(nearest->point.manhattan_distance()) + "\n"
+        "Fewest steps: " + to_string(fewest_steps);
       return result;
     } else {
       return "";
