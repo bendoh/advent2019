@@ -715,13 +715,47 @@ public:
 
   typedef int64_t memtype;
 
-  enum State { INPUT, OUTPUT, HALTED };
+  enum State { INPUT, HALTED };
   struct IntcodeProgram {
     vector<memtype> program;
     uint32_t pc = 0;
     State state = INPUT;
     memtype result = -1;
+    int32_t relative_base = 0;
   };
+
+  enum Mode { ABSOLUTE, IMMEDIATE, RELATIVE };
+
+  uint32_t fetch_target(IntcodeProgram *p, Mode mode) {
+    uint32_t target = 0;
+    switch(mode) {
+      case ABSOLUTE:
+        target = p->program[p->pc++];
+        break;
+      case IMMEDIATE:
+        target = p->pc++;
+        break;
+      case RELATIVE:
+        target = p->relative_base + p->program[p->pc++];
+        break;
+    }
+
+    return target;
+  }
+
+  memtype fetch_param(IntcodeProgram *p, Mode mode) {
+    uint32_t target = fetch_target(p, mode);
+
+    /*
+    printf("Fetching parameter with mode %s from target %d: %lld\n",
+        mode == ABSOLUTE ? "ABS" : mode == IMMEDIATE ? "IMM" : "REL",
+        target,
+        p->program[target]
+    );
+    */
+
+    return p->program[target];
+  }
 
   void day7_intcode_processor(IntcodeProgram *p, memtype input) {
     memtype opcode = 0;
@@ -732,95 +766,97 @@ public:
         fgetc(terminal);
       }
 
+//      printf("program[%d] = %d\n", p->pc, p->program[p->pc]);
       opcode = p->program[p->pc] % 100;
       memtype mode = p->program[p->pc] / 100;
 
       p->pc++;
 
-      bool is_immediate[3] = {
+      Mode modes[3] = {
         // Positions 1..N
-        (bool) (mode & 1),
-        (bool) (mode / 10 & 1),
-        (bool) (mode / 100 & 1)
+        (Mode) (mode % 10),
+        (Mode) ((mode / 10) % 10),
+        (Mode) ((mode / 100) % 10)
       };
 
+      /*
+      printf("Opcode %lld, Modes: %s/%s/%s\n",
+          opcode,
+          modes[0] == ABSOLUTE ? "ABS" : modes[0] == IMMEDIATE ? "IMM" : "REL",
+          modes[1] == ABSOLUTE ? "ABS" : modes[1] == IMMEDIATE ? "IMM" : "REL",
+          modes[2] == ABSOLUTE ? "ABS" : modes[2] == IMMEDIATE ? "IMM" : "REL"
+        );
+    */
       if(opcode == 1) { // Addition
-        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
-        p->pc++;
-        memtype arg1 = p->program[target1];
-        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
-        p->pc++;
-        memtype arg2 = p->program[target2];
-        uint32_t dest = p->program[p->pc];
+        memtype
+          arg1 = fetch_param(p, modes[0]),
+          arg2 = fetch_param(p, modes[1]),
+          dest = fetch_target(p, modes[2]);
         p->program[dest] = arg1 + arg2;
-        p->pc++;
-        //printf("%lld + %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+//        printf("%lld + %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
       }
 
       else if(opcode == 2) { // Multiplication
-        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
-        p->pc++;
-        memtype arg1 = p->program[target1];
-        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
-        p->pc++;
-        memtype arg2 = p->program[target2];
-        uint32_t dest = p->program[p->pc];
-        p->pc++;
+        memtype
+          arg1 = fetch_param(p, modes[0]),
+          arg2 = fetch_param(p, modes[1]),
+          dest = fetch_target(p, modes[2]);
         p->program[dest] = arg1 * arg2;
-        //printf("%lld * %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+//        printf("%lld * %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
       }
 
       else if (opcode == 3) {
         if (!consumed_input) {
-          uint32_t position = p->program[p->pc];
-          p->pc++;
+          uint32_t position;
+          position = p->program[p->pc++];
+          if (modes[0] == RELATIVE) {
+            position += p->relative_base;
+          }
           p->program[position] = input;
-          //printf("p->program[%d] = %d\n", position, input);
-          //printf("Now p->program[%d] = %lld\n", position, p->program[position]);
+//          printf("p->program[%d] = %d\n", position, input);
+//         printf("Now p->program[%d] = %lld\n", position, p->program[position]);
           consumed_input = true;
         } else {
           p->state = INPUT;
           p->pc--; // Restart here
-          //printf("Waiting for next input...\n");
+//          printf("Waiting for next input...\n");
           return;
         }
       }
 
       else if (opcode == 4) {
-        uint32_t position = p->program[p->pc];
-        p->pc++;
-        p->result = p->program[position];
-        p->state = OUTPUT;
-        //printf("Value at position %d: %d\n", position, p->program[position]);
+        p->result = fetch_param(p, modes[0]);
+        // printf("Output: %lld\n", p->result);
       }
 
       else if (opcode == 5 || opcode == 6) {
-        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
-        p->pc++;
-        memtype arg1 = p->program[target1];
-        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
-        p->pc++;
-        uint32_t dest = p->program[target2];
+        memtype arg1 = fetch_param(p, modes[0]),
+                dest = fetch_param(p, modes[1]);
 
-        //printf("program[%d] = %d %s 0 -> %d\n", target1, arg1, opcode == 5 ? "!=" : "==", dest);
+        // printf("%d %s 0 -> %d\n", arg1, opcode == 5 ? "!=" : "==", dest);
         if((opcode == 5 && arg1 != 0) || (opcode == 6 && arg1 == 0)) {
-          printf("Jumping to %d\n",  dest);
+          //printf("Jumping to %lld\n",  dest);
           p->pc = dest;
         }
       }
 
       else if (opcode == 7 || opcode == 8) {
-        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
-        memtype arg1 = p->program[target1];
-        p->pc++;
-        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
-        memtype arg2 = p->program[target2];
-        p->pc++;
-        uint32_t dest = p->program[p->pc];
-        p->pc++;
+        memtype arg1 = fetch_param(p, modes[0]),
+                arg2 = fetch_param(p, modes[1]),
+                dest = fetch_target(p, modes[2]);
+
         p->program[dest] = (opcode == 7 && arg1 < arg2) || (opcode == 8 && arg1 == arg2) ? 1 : 0;
-        // printf("%lld %s %lld = %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, p->program[dest]);
-      } else {
+        // printf("%lld %s %lld = [%lld] %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, dest, p->program[dest]);
+      }
+
+      else if (opcode == 9) {
+        memtype arg1 = fetch_param(p, modes[0]);
+        // printf("Relative base: %d", p->relative_base);
+        p->relative_base += arg1;
+        // printf(" += %d => %d\n", arg1, p->relative_base);
+      }
+
+      else {
         printf("[ERROR] Invalid opcode %lld!\n", opcode);
       }
 
@@ -981,7 +1017,7 @@ public:
 
     for(uint32_t i = 0; i < merged_result.size(); i++) {
       if (merged_result[i] == 1) {
-        FillRect(100 + i % width, 100 + i / width, 1, 1);
+        FillRect(500 + i % width, 100 + i / width, 1, 1);
       }
     }
 
@@ -992,6 +1028,55 @@ public:
         "Product: " + to_string(layer_digit_counts[layer_with_fewest_zeros][1] * layer_digit_counts[layer_with_fewest_zeros][2]) + "\n";
   }
 
+  string day9() {
+    vector<memtype> program_template;
+
+    for (auto &line : input_lines) {
+      vector<string> line_opcodes = regex_split(line, ",");
+
+      for (auto &opcode : line_opcodes) {
+        program_template.push_back(stol(opcode));
+      }
+    }
+
+    program_template.resize(program_template.size() * 100, 0);
+
+    IntcodeProgram p;
+    p.program = program_template;
+    day7_intcode_processor(&p, 1);
+    memtype result_1 = p.result;
+    /*
+
+    cout << "\033[2J";
+    cout << "\033[H\033[7m         ";
+    for(uint32_t i = 0; i < 8; i++) {
+      printf("%02x        ", i);
+    }
+    cout << "\033[0m";
+    for(uint32_t i = 0; i < p.program.size(); i++) {
+      if (i % 8 == 0) {
+        cout << "\n";
+        printf("\033[7m%02x\033[0m ", i);
+      }
+
+      if (i == p.pc) {
+        printf("\033[5m%8lld\033[0m  ", p.program[i]);
+      }
+      else {
+        printf("%8lld  ", p.program[i]);
+      }
+    }
+    printf("\nPC is at %d\n", p.pc);
+    */
+    day_complete = true;
+    IntcodeProgram p2;
+    p2.program = program_template;
+    day7_intcode_processor(&p2, 2);
+    memtype result_2 = p2.result;
+
+    return "Part1: " + to_string(result_1) + "\nPart2: " + to_string(result_2);
+  }
+
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -999,7 +1084,7 @@ public:
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
-    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8
+    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9
 
   } {
     daynum = _daynum;
