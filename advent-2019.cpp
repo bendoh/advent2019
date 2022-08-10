@@ -20,6 +20,9 @@ vector<std::string> input_lines;
 bool is_interactive = false;
 bool is_visual = false;
 
+// Border in SCREEN space
+uint16_t border = 10;
+
 olc::PixelGameEngine *pge;
 
 FILE *terminal;
@@ -88,8 +91,6 @@ void parse_environment() {
 class Advent2019 : public olc::PixelGameEngine
 {
 public:
-  int8_t daynum = 0;
-  int8_t currentDay;
   string error_state;
 
   map<uint8_t, string>results;
@@ -126,11 +127,10 @@ public:
 
     char result[255];
     snprintf(result, 255,
-        "total fuel needed for all mass: %d\n\
-        total fuel needed for all mass + all fuel: %d",
-        total_fuel_part1,
-        total_fuel_part2
-        );
+      "total fuel needed for all mass: %d\ntotal fuel needed for all mass + all fuel: %d",
+      total_fuel_part1,
+      total_fuel_part2
+    );
 
     day_complete = true;
     return string(result);
@@ -161,7 +161,7 @@ public:
 
   }
 
-  uint32_t day2_intcode_processor(vector<int32_t> program) {
+  int32_t day2_intcode_processor(vector<int32_t> program) {
     uint32_t opcode = 0;
     uint32_t pc = 0;
     string input;
@@ -192,7 +192,6 @@ public:
         uint32_t dest = program[pc++];
         program[dest] = arg1 * arg2;
       }
-
 
       opcode = program[pc];
     }
@@ -291,9 +290,6 @@ public:
 
     uint32_t distanceX = (northeast.x - southwest.x),
              distanceY = (northeast.y - southwest.y);
-
-    // Border in SCREEN space
-    uint16_t border = 10;
 
     // Scale as separate (X,Y) to conform to whatever screen dimensions we have
     scale = olc::vf2d(
@@ -512,10 +508,11 @@ public:
 
   }
 
-  int32_t day5_intcode_processor(vector<int32_t> program, int32_t input) {
+  int32_t day5_intcode_processor(vector<int32_t> program, vector<int32_t> inputs) {
     uint32_t opcode = 0;
     uint32_t pc = 0;
     int32_t val = 0;
+    uint32_t input_count = 0;
 
     while(opcode != 99) {
       if (is_visual || is_interactive) {
@@ -558,7 +555,8 @@ public:
       else if (opcode == 3) {
         uint32_t position = program[pc];
         pc++;
-        program[position] = input;
+        program[position] = inputs[input_count];
+        input_count++;
       }
 
       else if (opcode == 4) {
@@ -614,12 +612,12 @@ public:
     if (is_interactive) {
       cout << "Input? ";
       fscanf(terminal, "%10s", user_input);
-      int32_t result_1 = day5_intcode_processor(program, atoi(user_input));
+      int32_t result_1 = day5_intcode_processor(program, { atoi(user_input) });
 
       return to_string(result_1);
     } else {
-      int32_t result_1 = day5_intcode_processor(program, 1);
-      int32_t result_2 = day5_intcode_processor(program, 5);
+      int32_t result_1 = day5_intcode_processor(program, { 1 });
+      int32_t result_2 = day5_intcode_processor(program, { 5 });
 
       day_complete = true;
       return to_string(result_1) + "\n" + to_string(result_2);
@@ -698,25 +696,323 @@ public:
     return result + "; distance between SAN and YOU: " + to_string(min_distance);
   }
 
+  vector<vector<int8_t>> permutations;
+
+  void get_permutations(vector<uint8_t> choices, uint8_t pos, vector<int8_t> perm) {
+    if (choices.size() == 0) {
+      permutations.push_back(perm);
+    }
+    for(uint32_t i = 0; i < choices.size(); i++) {
+      uint8_t choice = choices[i];
+      vector<uint8_t> next_choices = choices;
+      vector<int8_t> next_permutation = perm;
+      printf("Choice for %d is %d\n", i, choice);
+      next_permutation[pos] = choice;
+      next_choices.erase (next_choices.begin()+i);
+      get_permutations(next_choices, pos+1, next_permutation);
+    }
+  }
+
+  typedef int64_t memtype;
+
+  enum State { INPUT, OUTPUT, HALTED };
+  struct IntcodeProgram {
+    vector<memtype> program;
+    uint32_t pc = 0;
+    State state = INPUT;
+    memtype result = -1;
+  };
+
+  void day7_intcode_processor(IntcodeProgram *p, memtype input) {
+    memtype opcode = 0;
+    bool consumed_input = false;
+
+    while(opcode != 99) {
+      if (is_interactive) {
+        fgetc(terminal);
+      }
+
+      opcode = p->program[p->pc] % 100;
+      memtype mode = p->program[p->pc] / 100;
+
+      p->pc++;
+
+      bool is_immediate[3] = {
+        // Positions 1..N
+        (bool) (mode & 1),
+        (bool) (mode / 10 & 1),
+        (bool) (mode / 100 & 1)
+      };
+
+      if(opcode == 1) { // Addition
+        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
+        p->pc++;
+        memtype arg1 = p->program[target1];
+        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
+        p->pc++;
+        memtype arg2 = p->program[target2];
+        uint32_t dest = p->program[p->pc];
+        p->program[dest] = arg1 + arg2;
+        p->pc++;
+        //printf("%lld + %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+      }
+
+      else if(opcode == 2) { // Multiplication
+        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
+        p->pc++;
+        memtype arg1 = p->program[target1];
+        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
+        p->pc++;
+        memtype arg2 = p->program[target2];
+        uint32_t dest = p->program[p->pc];
+        p->pc++;
+        p->program[dest] = arg1 * arg2;
+        //printf("%lld * %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+      }
+
+      else if (opcode == 3) {
+        if (!consumed_input) {
+          uint32_t position = p->program[p->pc];
+          p->pc++;
+          p->program[position] = input;
+          //printf("p->program[%d] = %d\n", position, input);
+          //printf("Now p->program[%d] = %lld\n", position, p->program[position]);
+          consumed_input = true;
+        } else {
+          p->state = INPUT;
+          p->pc--; // Restart here
+          //printf("Waiting for next input...\n");
+          return;
+        }
+      }
+
+      else if (opcode == 4) {
+        uint32_t position = p->program[p->pc];
+        p->pc++;
+        p->result = p->program[position];
+        p->state = OUTPUT;
+        //printf("Value at position %d: %d\n", position, p->program[position]);
+      }
+
+      else if (opcode == 5 || opcode == 6) {
+        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
+        p->pc++;
+        memtype arg1 = p->program[target1];
+        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
+        p->pc++;
+        uint32_t dest = p->program[target2];
+
+        //printf("program[%d] = %d %s 0 -> %d\n", target1, arg1, opcode == 5 ? "!=" : "==", dest);
+        if((opcode == 5 && arg1 != 0) || (opcode == 6 && arg1 == 0)) {
+          printf("Jumping to %d\n",  dest);
+          p->pc = dest;
+        }
+      }
+
+      else if (opcode == 7 || opcode == 8) {
+        uint32_t target1 = is_immediate[0] ? p->pc : p->program[p->pc];
+        memtype arg1 = p->program[target1];
+        p->pc++;
+        uint32_t target2 = is_immediate[1] ? p->pc : p->program[p->pc];
+        memtype arg2 = p->program[target2];
+        p->pc++;
+        uint32_t dest = p->program[p->pc];
+        p->pc++;
+        p->program[dest] = (opcode == 7 && arg1 < arg2) || (opcode == 8 && arg1 == arg2) ? 1 : 0;
+        // printf("%lld %s %lld = %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, p->program[dest]);
+      } else {
+        printf("[ERROR] Invalid opcode %lld!\n", opcode);
+      }
+
+      opcode = p->program[p->pc];
+    }
+
+    p->state = HALTED;
+  }
+
+  string day7() {
+    vector<memtype> program_template;
+
+    printf("Parsing lines...\n");
+    for (auto &line : input_lines) {
+      vector<string> line_opcodes = regex_split(line, ",");
+
+      for (auto &opcode : line_opcodes) {
+        program_template.push_back(stoi(opcode));
+      }
+    }
+
+    vector<uint8_t> choices = { 0, 1, 2, 3, 4 };
+    vector<int8_t> permutation = { -1, -1, -1, -1, -1 };
+
+    uint32_t max_output = 0;
+    get_permutations(choices, 0, permutation);
+
+    // Find max output and permutation which triggers it
+    for(int i = 0; i < permutations.size(); i++) {
+      auto perm = permutations[i];
+      int32_t input = 0;
+
+      printf("%i: %d %d %d %d %d\n", i, perm[0], perm[1], perm[2], perm[3], perm[4]);
+
+      for(int j = 0; j < 5; j++) {
+        uint8_t phase = perm[j];
+        vector<int32_t> program;
+
+        for(int k = 0; k < program_template.size(); k++) {
+          program.push_back(program_template[k]);
+        }
+
+        input = day5_intcode_processor(program, { phase, input });
+      }
+
+      printf("Output for this permutation: %d\n", input);
+
+      if (input > max_output) {
+        max_output = input;
+      }
+    }
+
+    vector<uint8_t> part2_choices = { 5, 6, 7, 8, 9 };
+    permutation = { -1, -1, -1, -1, -1 };
+    memtype max_feedback_output = 0;
+    get_permutations(part2_choices, 0, permutation);
+
+    for(int i = 0; i < permutations.size(); i++) {
+      vector<int8_t> perm = permutations[i];
+      printf("%i: %d %d %d %d %d\n", i, perm[0], perm[1], perm[2], perm[3], perm[4]);
+
+      IntcodeProgram programs[5];
+
+      for(int j = 0; j < 5; j++) {
+        programs[j].program = program_template;
+        // printf("Initializing stage %d with %d\n", j, perm[j]);
+        day7_intcode_processor(&programs[j], perm[j]);
+      }
+
+      IntcodeProgram *cp = &programs[0];
+      memtype input = 0;
+      uint32_t stage = 0;
+      uint32_t num_halted = 0;
+
+      while(1) {
+        //printf("Running stage %d with input %lld, pc=%d\n", stage, input, cp->pc);
+        day7_intcode_processor(cp, input);
+        input = cp->result;
+        //printf("Stage %d stopped with status %d and result %lld\n", stage, cp->state, input);
+        stage = (stage + 1) % 5;
+
+        if(cp->state == HALTED) {
+          num_halted ++;
+          //printf("Stage %d, halted with result %lld\n", stage, input);
+
+          if(num_halted == 5)
+            break;
+        }
+
+        cp = &programs[stage];
+      }
+
+      if (input > max_feedback_output) {
+        max_feedback_output = input;
+      }
+    }
+
+    day_complete = true;
+    return "Max output: " + to_string(max_output) + "\n"
+      + "Max feedback output: " + to_string(max_feedback_output);
+  }
+
+  string day8() {
+    day_complete = 1;
+
+    uint8_t width = 25;
+    uint8_t height = 6;
+    string input = input_lines[0];
+
+    vector<vector<uint8_t>> layers;
+
+    for(uint32_t i = 0; i < input.size(); i++) {
+      uint32_t layer_idx = i / (width * height);
+
+      if(layer_idx == layers.size()) {
+        layers.push_back(vector<uint8_t>());
+      }
+
+      layers[layer_idx].push_back(input[i] - '0');
+    }
+    layers.pop_back();
+
+    int32_t layer_with_fewest_zeros = -1;
+    int32_t fewest_zero_count = INT_MAX;
+
+    vector<vector<uint32_t>> layer_digit_counts;
+
+    for(uint32_t layer_idx = 0; layer_idx < layers.size(); layer_idx++) {
+      printf("\nLayer %d", layer_idx);
+      vector<uint8_t> layer = layers[layer_idx];
+      vector<uint32_t> digit_counts = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+      for(uint32_t i = 0; i < layer.size(); i++) {
+        if(i % width == 0) { printf("\n"); }
+        printf("%d", layer[i]);
+
+        digit_counts[layer[i]]++;
+      }
+
+      if(digit_counts[0] < fewest_zero_count) {
+        fewest_zero_count = digit_counts[0];
+        layer_with_fewest_zeros = layer_idx;
+      }
+
+      layer_digit_counts.push_back(digit_counts);
+      printf("\n");
+    }
+
+    vector<uint8_t> merged_result = layers[0];
+
+    for(uint8_t l = 0; l < layers.size(); l++) {
+      for(uint32_t i = 0; i < merged_result.size(); i++) {
+        if (merged_result[i] == 2) {
+          merged_result[i] = layers[l][i];
+        }
+      }
+    }
+
+    for(uint32_t i = 0; i < merged_result.size(); i++) {
+      if (merged_result[i] == 1) {
+        FillRect(100 + i % width, 100 + i / width, 1, 1);
+      }
+    }
+
+    day_complete = true;
+    return "Layer with fewest 0s: " + to_string(layer_with_fewest_zeros) + "\n" +
+        "Number of 1s: " + to_string(layer_digit_counts[layer_with_fewest_zeros][1]) + "; " +
+        "Number of 2s: " + to_string(layer_digit_counts[layer_with_fewest_zeros][2]) + "\n" +
+        "Product: " + to_string(layer_digit_counts[layer_with_fewest_zeros][1] * layer_digit_counts[layer_with_fewest_zeros][2]) + "\n";
+  }
+
+
   vector<string(Advent2019::*)()> days;
+  int8_t current_day = -1;
 
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
-    &Advent2019::day6
+    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8
 
   } {
     daynum = _daynum;
 
-    if (daynum > -1)
-      currentDay = daynum;
     sAppName = "Bendoh's Advent 2019";
 
     printf("Starting up. There are %lu days attempted.\n", days.size());
 
     if (daynum > -1) {
+      current_day = daynum;
       printf("Only doing day %d\n", daynum);
     } else {
+      current_day = 0;
       printf("Doing all days!\n");
     }
   }
@@ -744,6 +1040,7 @@ public:
   bool starting_day = true;
   float day_time = 0;
   bool day_complete = false;
+  int8_t daynum = 0;
 
 	bool OnUserUpdate(float fElapsedTime) override {
     if (!error_state.empty()) {
@@ -751,10 +1048,15 @@ public:
       return true;
     }
 
-    if (currentDay > -1) {
+    if (current_day > -1) {
+      string (Advent2019::*func)() = days[current_day];
+
+      Clear(olc::BLACK);
+
       if (starting_day) {
-        if ((daynum == 0 || input_lines.empty()) && currentDay > 0) {
-          string input_file = "inputs/2019/" + to_string(currentDay);
+        cout << "Day " << to_string(current_day) << " started\n";
+        if ((daynum == -1 || input_lines.empty()) && current_day > 0) {
+          string input_file = "inputs/2019/" + to_string(current_day);
           cout << "Getting input from " << input_file << "\n";
           FILE *input = fopen(input_file.c_str(), "r");
 
@@ -763,52 +1065,47 @@ public:
             return true;
           }
 
-          // If lines are longer than 10k we have a problem...
-          char input_line[10240];
+          // If lines are longer than 50k we have a problem...
+          char input_line[1024 * 50];
           input_lines = {};
-          while(fgets(input_line, 10240, input))
+          while(fgets(input_line, 10240 * 50, input))
             input_lines.push_back(string(input_line));
           fclose(input);
         }
         day_time = 0;
-      }
-
-      string (Advent2019::*func)() = days[currentDay];
-
-      Clear(olc::BLACK);
-
-      if (starting_day) {
-        cout << "Day " << to_string(currentDay) << " started\n";
         // Day is started, start computing next frame
         starting_day = false;
         day_complete = false;
       } else {
-        cout << "Computing " << to_string(currentDay) << " ...\n";
+        cout << "Computing " << to_string(current_day) << " ...\n";
         day_time += fElapsedTime;
 
         // Day is started, start computing next frame
         string result = (this->*func)();
+        cout << "Computed!\n";
 
         if (day_complete) {
-          results[currentDay] = result;
+          results[current_day] = result;
           cout << result << "\n";
 
-          if (daynum == 0) {
-            if (currentDay >= days.size()) {
-              currentDay = -1; // We are done.
+          if (daynum == -1) {
+            if (current_day == days.size() - 1) {
+              current_day = -1; // We are done.
             } else {
-              currentDay++; // Move on to the next puzzle
+              current_day++; // Move on to the next puzzle
               starting_day = true;
             }
           } else {
-            currentDay = -1; // We are done.
+            current_day = -1; // We are done.
           }
         }
       }
     }
 
     for (map<uint8_t, string>::iterator it=results.begin(); it!=results.end(); ++it) {
-      DrawStringDecal(olc::vf2d(5, 45), "Day " + to_string(it->first) + ": " + it->second);
+      uint32_t y_offset = daynum == -1 ? 20 * it->first : 0;
+      DrawStringDecal(olc::vf2d(5, y_offset + border), "Day " + to_string(it->first));
+      DrawStringDecal(olc::vf2d(60, y_offset + border), it->second);
     }
 
 		return true;
