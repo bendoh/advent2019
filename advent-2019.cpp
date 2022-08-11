@@ -730,7 +730,7 @@ public:
     vector<memtype> program;
     uint32_t pc = 0;
     State state = INPUT;
-    memtype result = -1;
+    vector<memtype> result = {};
     int32_t relative_base = 0;
   };
 
@@ -776,7 +776,7 @@ public:
         fgetc(terminal);
       }
 
-//      printf("program[%d] = %d\n", p->pc, p->program[p->pc]);
+//      printf("program[%lld] = %lld\n", p->pc, p->program[p->pc]);
       opcode = p->program[p->pc] % 100;
       memtype mode = p->program[p->pc] / 100;
 
@@ -789,21 +789,22 @@ public:
         (Mode) ((mode / 100) % 10)
       };
 
-      /*
+/*
       printf("Opcode %lld, Modes: %s/%s/%s\n",
           opcode,
           modes[0] == ABSOLUTE ? "ABS" : modes[0] == IMMEDIATE ? "IMM" : "REL",
           modes[1] == ABSOLUTE ? "ABS" : modes[1] == IMMEDIATE ? "IMM" : "REL",
           modes[2] == ABSOLUTE ? "ABS" : modes[2] == IMMEDIATE ? "IMM" : "REL"
         );
-    */
+        */
+
       if(opcode == 1) { // Addition
         memtype
           arg1 = fetch_param(p, modes[0]),
           arg2 = fetch_param(p, modes[1]),
           dest = fetch_target(p, modes[2]);
         p->program[dest] = arg1 + arg2;
-//        printf("%lld + %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+//        printf("%lld + %lld = %lld -> program[%lld]\n", arg1, arg2, p->program[dest], dest);
       }
 
       else if(opcode == 2) { // Multiplication
@@ -823,20 +824,20 @@ public:
             position += p->relative_base;
           }
           p->program[position] = input;
-//          printf("p->program[%d] = %d\n", position, input);
+//          printf("p->program[%lld] = %d\n", position, input);
 //         printf("Now p->program[%d] = %lld\n", position, p->program[position]);
           consumed_input = true;
         } else {
           p->state = INPUT;
           p->pc--; // Restart here
-//          printf("Waiting for next input...\n");
+          //printf("Waiting for next input...\n");
           return;
         }
       }
 
       else if (opcode == 4) {
-        p->result = fetch_param(p, modes[0]);
-        // printf("Output: %lld\n", p->result);
+        p->result.push_back(fetch_param(p, modes[0]));
+        //printf("Output: %lld\n", p->result.back());
       }
 
       else if (opcode == 5 || opcode == 6) {
@@ -845,7 +846,7 @@ public:
 
         // printf("%d %s 0 -> %d\n", arg1, opcode == 5 ? "!=" : "==", dest);
         if((opcode == 5 && arg1 != 0) || (opcode == 6 && arg1 == 0)) {
-          //printf("Jumping to %lld\n",  dest);
+//          printf("Jumping to %lld\n",  dest);
           p->pc = dest;
         }
       }
@@ -856,7 +857,7 @@ public:
                 dest = fetch_target(p, modes[2]);
 
         p->program[dest] = (opcode == 7 && arg1 < arg2) || (opcode == 8 && arg1 == arg2) ? 1 : 0;
-        // printf("%lld %s %lld = [%lld] %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, dest, p->program[dest]);
+//         printf("%lld %s %lld = [%lld] %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, dest, p->program[dest]);
       }
 
       else if (opcode == 9) {
@@ -877,16 +878,7 @@ public:
   }
 
   string day7() {
-    vector<memtype> program_template;
-
-    printf("Parsing lines...\n");
-    for (auto &line : input_lines) {
-      vector<string> line_opcodes = regex_split(line, ",");
-
-      for (auto &opcode : line_opcodes) {
-        program_template.push_back(stoi(opcode));
-      }
-    }
+    vector<memtype> program_template = parse_program();
 
     vector<uint8_t> choices = { 0, 1, 2, 3, 4 };
     vector<int8_t> permutation = { -1, -1, -1, -1, -1 };
@@ -944,7 +936,8 @@ public:
       while(1) {
         //printf("Running stage %d with input %lld, pc=%d\n", stage, input, cp->pc);
         day7_intcode_processor(cp, input);
-        input = cp->result;
+        input = cp->result.back();
+        cp->result.pop_back();
         //printf("Stage %d stopped with status %d and result %lld\n", stage, cp->state, input);
         stage = (stage + 1) % 5;
 
@@ -1038,23 +1031,30 @@ public:
         "Product: " + to_string(layer_digit_counts[layer_with_fewest_zeros][1] * layer_digit_counts[layer_with_fewest_zeros][2]) + "\n";
   }
 
-  string day9() {
-    vector<memtype> program_template;
+  vector<memtype> parse_program() {
+    vector<memtype> program;
 
     for (auto &line : input_lines) {
       vector<string> line_opcodes = regex_split(line, ",");
 
       for (auto &opcode : line_opcodes) {
-        program_template.push_back(stol(opcode));
+        program.push_back(stol(opcode));
       }
     }
+
+    return program;
+  }
+
+  string day9() {
+    vector<memtype> program_template = parse_program();
 
     program_template.resize(program_template.size() * 100, 0);
 
     IntcodeProgram p;
     p.program = program_template;
     day7_intcode_processor(&p, 1);
-    memtype result_1 = p.result;
+    memtype result_1 = p.result.back();
+    p.result.pop_back();
     /*
 
     cout << "\033[2J";
@@ -1082,7 +1082,8 @@ public:
     IntcodeProgram p2;
     p2.program = program_template;
     day7_intcode_processor(&p2, 2);
-    memtype result_2 = p2.result;
+    memtype result_2 = p2.result.back();
+    p2.result.pop_back();
 
     return "Part1: " + to_string(result_1) + "\nPart2: " + to_string(result_2);
   }
@@ -1236,6 +1237,71 @@ public:
     return "Part1: " + part1_result + "\nPart2: " + part2_result;
   }
 
+  struct Panel {
+    bool color = 0;
+    uint32_t count = 0;
+  };
+
+  string day11_execute(bool color) {
+    IntcodeProgram p;
+    p.program = parse_program();
+    Panel hull[200][200];
+
+    uint32_t x = 99, y = 99;
+    double pi2 = acos(-1) / 2;
+    double direction = pi2;
+    uint32_t unique_paints = 0;
+
+    hull[x][y].color = color;
+
+    printf("Starting with (%d, %d) = %d\n", x, y, color);
+    while(p.state != HALTED) {
+      day7_intcode_processor(&p, hull[x][y].color);
+
+      memtype turn_direction = p.result.back();
+      p.result.pop_back();
+      memtype color = p.result.back();
+      p.result.pop_back();
+
+      if (turn_direction == 0)
+        direction += pi2;
+      else
+        direction -= pi2;
+
+      if (direction > pi2 * 4) {
+        direction -= pi2 * 4;
+      } else if(direction < -pi2 * 4) {
+        direction += pi2 * 4;
+      }
+
+//      printf("Turn: %lld, color: %lld, direction: %f, pos=(%d, %d)\n", turn_direction, color, direction, x, y);
+      hull[x][y].color = color;
+      if (hull[x][y].count == 0) {
+        unique_paints++;
+      }
+      hull[x][y].count++;
+
+      x += cos(direction);
+      y += sin(direction);
+    }
+
+    if (color == 1) {
+      for(uint32_t x = 0; x < 200; x++)
+        for(uint32_t y = 0; y < 200; y++)
+          if (hull[x][y].color)
+            FillRect(x, 200-y, 1, 1, olc::BLUE);
+    }
+
+    return to_string(unique_paints);
+  }
+
+  string day11() {
+    string unique_paints = day11_execute(0);
+    day11_execute(1);
+    day_complete = true;
+    return "Part1: painted " + unique_paints + " segments";
+  }
+
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -1243,7 +1309,8 @@ public:
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
-    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10
+    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10,
+    &Advent2019::day11
 
   } {
     daynum = _daynum;
