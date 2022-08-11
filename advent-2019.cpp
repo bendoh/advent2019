@@ -10,6 +10,7 @@
 #include <functional>
 #include <algorithm>
 #include <stdlib.h>
+#include <math.h>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine/olcPixelGameEngine.h"
@@ -65,6 +66,15 @@ struct Intersection {
   uint32_t distance = 0;
 };
 
+
+struct Asteroid {
+  Point point = { 0, 0 };
+  double distance = 0;
+
+  bool operator<(const Asteroid rhs) const {
+      return distance < rhs.distance;
+  }
+};
 
 void parse_environment() {
   const char *env_interactive = getenv("AOC_INTERACTIVE");
@@ -1077,6 +1087,155 @@ public:
     return "Part1: " + to_string(result_1) + "\nPart2: " + to_string(result_2);
   }
 
+  typedef vector<vector<bool>> asteroid_field;
+
+  map<double, vector<Asteroid>> find_visible(asteroid_field field, int y, int x) {
+    // Only one asteroid can occupy any particular angle so the number
+    // of unique angles we can trace to other asteroids is the number that are
+    // visible
+    map<double, vector<Asteroid>> angles;
+    printf("Counting at (%d, %d)... ", x, y);
+    for(int i = 0; i < field.size(); i++) {
+      for(int j = 0; j < field[i].size(); j++) {
+        if((i == y && j == x) || !field[i][j]) continue;
+        double angle;
+
+        double dx = j - x;
+        double dy = i - y;
+
+        Asteroid a;
+        a.point.x = j;
+        a.point.y = i;
+        a.distance = dx * dx + dy * dy;
+        angle = atan2(dy, dx) * 180 / acos(-1) + 180;
+
+        if (angles.find(angle) == angles.end()) {
+          angles[angle] = { a };
+        } else {
+          angles[angle].push_back(a);
+        }
+      }
+    }
+
+    printf("%ld asteroids\n", angles.size());
+    return angles;
+  }
+
+  string day10() {
+    asteroid_field field;
+
+    for (int i = 0; i < input_lines.size(); i++) {
+      vector<bool> line;
+      for (int c = 0; c < input_lines[i].length(); c++) {
+        if (input_lines[i][c] != '\n') {
+          printf("%c", input_lines[i][c]);
+          line.push_back(input_lines[i][c] == '#');
+        }
+      }
+      printf("\n");
+      field.push_back(line);
+    }
+
+    float star_scale = 0.6;
+    uint32_t field_height = field.size(),
+             field_width = field[0].size(),
+             grid_height = (ScreenHeight() - border * 2) / field_height,
+             grid_width = (ScreenWidth() - border * 2) / field_width,
+             star_height = grid_height * star_scale,
+             star_width = grid_width * star_scale,
+             star_offset_y = (grid_height - star_height),
+             star_offset_x = (grid_width - star_width);
+
+    for (int i = 0; i < field_height; i++) {
+      DrawLine(border, i * grid_height + border, ScreenWidth() - border, i * grid_height + border, olc::GREY);
+      for (int j = 0; j < field_width; j++) {
+        DrawLine(j * grid_width + border, border, j * grid_width + border, ScreenHeight() - border, olc::GREY);
+        if(field[i][j]) {
+          FillCircle(
+              border + grid_width * j + star_offset_x,
+              border + grid_height * i + star_offset_y,
+              (star_width + star_height) / 6,
+              olc::YELLOW
+          );
+        }
+      }
+    }
+    DrawLine(ScreenWidth() - border, border, ScreenWidth() - border, ScreenHeight() - border, olc::GREY);
+    DrawLine(border, ScreenHeight() - border, ScreenWidth() - border, ScreenHeight() - border, olc::GREY);
+
+    uint32_t max_visible = 0;
+    tuple<int, int> station_coordinates;
+    map<double, vector<Asteroid>> station_angles;
+
+    for (int i = 0; i < field_height; i++) {
+      for (int j = 0; j < field_width; j++) {
+        if (field[i][j]) {
+          map<double, vector<Asteroid>> angles = find_visible(field, i, j);
+          uint32_t num_visible = angles.size();
+
+          if (num_visible > max_visible) {
+            printf("Found %d at (%d, %d)\n", num_visible, j, i);
+            max_visible = num_visible;
+            station_coordinates = { j, i };
+            station_angles = angles;
+          }
+        }
+      }
+    }
+
+    string part1_result = "Max visible: " + to_string(max_visible);
+
+    // Pull a vector of all the possible angles, sort by distance, count
+    // total asteroids
+    vector<double> angles;
+    uint32_t total_asteroids = 0;
+    for (auto it = station_angles.begin(); it != station_angles.end(); ++it) {
+      angles.push_back(it->first);
+      sort(it->second.begin(), it->second.end());
+      total_asteroids += it->second.size();
+    }
+
+    sort(angles.begin(), angles.end());
+
+    // Start at the angle nearest to 90
+    uint32_t first_angle_idx = 0, i = 0;
+
+    for (auto it = angles.begin(); it != angles.end(); ++it) {
+      if(*it >= 90) {
+        first_angle_idx = i;
+        break;
+      }
+      i++;
+    }
+
+    uint32_t destroyed_asteroids = 0, angle_idx = first_angle_idx;
+    Asteroid last_destroyed;
+    while(1) {
+      double angle = angles[angle_idx++];
+
+      vector<Asteroid> asteroids = station_angles[angle];
+
+      if (asteroids.size() > 0) {
+        destroyed_asteroids ++;
+        last_destroyed = asteroids[0];
+
+        asteroids.erase(asteroids.begin());
+      }
+
+      if (destroyed_asteroids == 200 || destroyed_asteroids == total_asteroids)
+        break;
+
+      if (angle_idx > angles.size()) angle_idx = 0;
+    }
+
+    string part2_result = "Destroyed " + to_string(destroyed_asteroids) + " asteroids. ";
+
+    part2_result += "Last destroyed: (" + to_string(last_destroyed.point.x) + "," + to_string(last_destroyed.point.y) + ")";
+
+    day_complete = true;
+    return "Part1: " + part1_result + "\nPart2: " + part2_result;
+  }
+
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -1084,7 +1243,7 @@ public:
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
-    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9
+    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10
 
   } {
     daynum = _daynum;
