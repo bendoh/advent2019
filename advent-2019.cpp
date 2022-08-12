@@ -1,3 +1,4 @@
+#include <numeric>
 #include <stdio.h>
 #include <unistd.h>
 #include <iostream>
@@ -1302,6 +1303,146 @@ public:
     return "Part1: painted " + unique_paints + " segments";
   }
 
+  struct Coord {
+    int64_t x = 0, y = 0, z = 0;
+  };
+  struct Moon {
+    Coord position;
+    Coord lcm;
+    Coord initial;
+    Coord velocity;
+
+    uint64_t potential_energy() {
+      return abs(position.x) + abs(position.y) + abs(position.z);
+    }
+    uint64_t kinetic_energy() {
+      return abs(velocity.x) + abs(velocity.y) + abs(velocity.z);
+    }
+    uint64_t total_energy() {
+      return potential_energy() * kinetic_energy();
+    }
+
+    uint64_t steps_to_repeat() {
+      return std::lcm(std::lcm(lcm.x, lcm.z), lcm.y);
+    }
+  };
+
+
+  string day12() {
+    vector<Moon> moons;
+
+    for (auto &line : input_lines) {
+      Moon moon;
+
+      sscanf(line.c_str(), "<x=%lld, y=%lld, z=%lld>", &moon.position.x, &moon.position.y, &moon.position.z);
+      moon.initial = moon.position;
+      moons.push_back(moon);
+    }
+
+    for (int i = 0; i < moons.size(); i++) {
+      Moon moon = moons[i];
+      printf("Moon %d: <%lld, %lld, %lld>  <%lld, %lld, %lld>\n",
+          i,
+          moon.position.x,
+          moon.position.y,
+          moon.position.z,
+          moon.velocity.x,
+          moon.velocity.y,
+          moon.velocity.z
+        );
+    }
+
+    int64_t total_energy = 0;
+    uint64_t step = 0;
+    uint64_t steps_to_repeat = 0;
+    Coord axis_lcm;
+
+    while(1) {
+      // Apply gravity to all moons pairwise
+      for(uint8_t i = 0; i < moons.size(); i++) {
+        for(uint8_t j = 0; j < moons.size(); j++) {
+          if(i == j) continue;
+
+          Coord p1 = moons[i].position, p2 = moons[j].position;
+
+          if(p1.x < p2.x) moons[i].velocity.x += 1;
+          else if(p1.x > p2.x) moons[i].velocity.x -= 1;
+
+          if(p1.y < p2.y) moons[i].velocity.y += 1;
+          else if(p1.y > p2.y) moons[i].velocity.y -= 1;
+
+          if(p1.z < p2.z) moons[i].velocity.z += 1;
+          else if(p1.z > p2.z) moons[i].velocity.z -= 1;
+        }
+
+      }
+
+      // Apply new velocity
+      for(uint8_t i = 0; i < moons.size(); i++) {
+        moons[i].position.x += moons[i].velocity.x;
+        moons[i].position.y += moons[i].velocity.y;
+        moons[i].position.z += moons[i].velocity.z;
+      }
+
+      step++;
+
+      uint8_t matching[3] = {0, 0, 0};
+
+      for(uint8_t i = 0; i < moons.size(); i++) {
+        if(moons[i].position.x == moons[i].initial.x && moons[i].velocity.x == 0) {
+          matching[0]++;
+        }
+        if(moons[i].position.y == moons[i].initial.y && moons[i].velocity.y == 0) {
+          matching[1]++;
+        }
+        if(moons[i].position.z == moons[i].initial.z && moons[i].velocity.z == 0) {
+          matching[2]++;
+        }
+      }
+
+      if(matching[0] == moons.size() && axis_lcm.x == 0)
+        axis_lcm.x = step;
+      if(matching[1] == moons.size() && axis_lcm.y == 0)
+        axis_lcm.y = step;
+      if(matching[2] == moons.size() && axis_lcm.z == 0)
+        axis_lcm.z = step;
+
+      if(step == 10 || step == 100 || step == 1000 || (step % 1000000) == 0) {
+        printf("At %lld steps...\n", step);
+
+        total_energy = 0;
+        for(uint8_t i = 0; i < moons.size(); i++) {
+          printf("[%d] <%lld, %lld, %lld>   <%lld, %lld, %lld>  pot=%lld kin=%lld tot=%lld\n",
+              i,
+              moons[i].position.x, moons[i].position.y, moons[i].position.z,
+              moons[i].velocity.x, moons[i].velocity.y, moons[i].velocity.z,
+              moons[i].potential_energy(),
+              moons[i].kinetic_energy(),
+              moons[i].total_energy()
+          );
+          total_energy += moons[i].total_energy();
+        }
+        printf("%lld,%lld\n", step, total_energy);
+      }
+
+      steps_to_repeat = 1;
+
+      if(axis_lcm.x > 0 && axis_lcm.y > 0 && axis_lcm.z > 0) {
+        steps_to_repeat = lcm(lcm(axis_lcm.x, axis_lcm.y), axis_lcm.z);
+        printf("[%lld] lcm(%lld, %lld, %lld) = %lld\n", step,
+            axis_lcm.x, axis_lcm.y, axis_lcm.z, steps_to_repeat);
+      }
+
+      if(steps_to_repeat > 1)
+        break;
+    }
+
+    day_complete = true;
+    return
+      "Part1: Total energy after 1000 steps: " + to_string(total_energy) + "\n" +
+      "Part2: Steps needed to return: " + to_string(steps_to_repeat);
+  }
+
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -1310,7 +1451,7 @@ public:
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
     &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10,
-    &Advent2019::day11
+    &Advent2019::day11, &Advent2019::day12
 
   } {
     daynum = _daynum;
@@ -1337,8 +1478,15 @@ public:
 
     if (!isatty(fileno(stdin))) {
       cout << "Not connected to a TTY: Parsing lines from stdin\n";
-      while (std::cin >> line)
-        input_lines.push_back(line);
+      while (1) {
+        char linebuf[1024 * 50];
+        cin.getline(linebuf, 1024 * 50);
+
+        if(cin.gcount() == 0)
+          break;
+
+        input_lines.push_back(string(linebuf));
+      }
     }
 
     if (input_lines.size() > 0 && daynum == 0) {
