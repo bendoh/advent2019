@@ -7,7 +7,7 @@ CPP_ARGS=\
 	-std=c++17 \
 	-mmacosx-version-min=10.15 \
 	-framework OpenGL \
-  -framework GLUT \
+    -framework GLUT \
 	-framework Carbon \
 	-lpng
 advent-2019:

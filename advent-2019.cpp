@@ -768,7 +768,7 @@ public:
     return p->program[target];
   }
 
-  void day7_intcode_processor(IntcodeProgram *p, memtype input) {
+  void intcode_processor(IntcodeProgram *p, memtype input) {
     memtype opcode = 0;
     bool consumed_input = false;
 
@@ -789,6 +789,9 @@ public:
         (Mode) ((mode / 10) % 10),
         (Mode) ((mode / 100) % 10)
       };
+
+      if (opcode == 99)
+        break;
 
 /*
       printf("Opcode %lld, Modes: %s/%s/%s\n",
@@ -837,8 +840,10 @@ public:
       }
 
       else if (opcode == 4) {
-        p->result.push_back(fetch_param(p, modes[0]));
-        //printf("Output: %lld\n", p->result.back());
+        memtype output = fetch_param(p, modes[0]);
+//        printf("Writing output %lld\n", output);
+        p->result.push_back(output);
+//        printf("Wrote output: %lld\n", p->result.back());
       }
 
       else if (opcode == 5 || opcode == 6) {
@@ -879,7 +884,8 @@ public:
   }
 
   string day7() {
-    vector<memtype> program_template = parse_program();
+    parse_program();
+    vector<memtype> program_template = parsed_program;
 
     vector<uint8_t> choices = { 0, 1, 2, 3, 4 };
     vector<int8_t> permutation = { -1, -1, -1, -1, -1 };
@@ -926,7 +932,7 @@ public:
       for(int j = 0; j < 5; j++) {
         programs[j].program = program_template;
         // printf("Initializing stage %d with %d\n", j, perm[j]);
-        day7_intcode_processor(&programs[j], perm[j]);
+        intcode_processor(&programs[j], perm[j]);
       }
 
       IntcodeProgram *cp = &programs[0];
@@ -936,7 +942,7 @@ public:
 
       while(1) {
         //printf("Running stage %d with input %lld, pc=%d\n", stage, input, cp->pc);
-        day7_intcode_processor(cp, input);
+        intcode_processor(cp, input);
         input = cp->result.back();
         cp->result.pop_back();
         //printf("Stage %d stopped with status %d and result %lld\n", stage, cp->state, input);
@@ -1032,28 +1038,27 @@ public:
         "Product: " + to_string(layer_digit_counts[layer_with_fewest_zeros][1] * layer_digit_counts[layer_with_fewest_zeros][2]) + "\n";
   }
 
-  vector<memtype> parse_program() {
-    vector<memtype> program;
+  vector<memtype> parsed_program;
+
+  void parse_program() {
+    parsed_program.clear();
 
     for (auto &line : input_lines) {
       vector<string> line_opcodes = regex_split(line, ",");
 
       for (auto &opcode : line_opcodes) {
-        program.push_back(stol(opcode));
+        parsed_program.push_back(stol(opcode));
       }
     }
 
-    return program;
+    parsed_program.resize(parsed_program.size() * 100);
   }
 
   string day9() {
-    vector<memtype> program_template = parse_program();
-
-    program_template.resize(program_template.size() * 100, 0);
-
     IntcodeProgram p;
-    p.program = program_template;
-    day7_intcode_processor(&p, 1);
+    parse_program();
+    p.program = parsed_program;
+    intcode_processor(&p, 1);
     memtype result_1 = p.result.back();
     p.result.pop_back();
     /*
@@ -1081,8 +1086,8 @@ public:
     */
     day_complete = true;
     IntcodeProgram p2;
-    p2.program = program_template;
-    day7_intcode_processor(&p2, 2);
+    p2.program = parsed_program;
+    intcode_processor(&p2, 2);
     memtype result_2 = p2.result.back();
     p2.result.pop_back();
 
@@ -1245,7 +1250,8 @@ public:
 
   string day11_execute(bool color) {
     IntcodeProgram p;
-    p.program = parse_program();
+    parse_program();
+    p.program = parsed_program;
     Panel hull[200][200];
 
     uint32_t x = 99, y = 99;
@@ -1257,7 +1263,7 @@ public:
 
     printf("Starting with (%d, %d) = %d\n", x, y, color);
     while(p.state != HALTED) {
-      day7_intcode_processor(&p, hull[x][y].color);
+      intcode_processor(&p, hull[x][y].color);
 
       memtype turn_direction = p.result.back();
       p.result.pop_back();
@@ -1443,6 +1449,109 @@ public:
       "Part2: Steps needed to return: " + to_string(steps_to_repeat);
   }
 
+#define FIELD_SIZE 50
+#define TILE_SIZE 5
+  enum Tile { BLANK, WALL, BLOCK, PADDLE, BALL };
+
+  typedef Tile Field[FIELD_SIZE][FIELD_SIZE];
+
+  void draw_field(Field field) {
+    for(int i = 0; i < FIELD_SIZE; i++) {
+      for(int j = 0; j < FIELD_SIZE; j++) {
+        olc::Pixel color = olc::BLACK;
+        if(field[i][j] == WALL) color = olc::BLUE;
+        if(field[i][j] == BLOCK) color = olc::RED;
+        if(field[i][j] == PADDLE) color = olc::GREEN;
+        if(field[i][j] == BALL) color = olc::CYAN;
+        FillRect(100 + i * TILE_SIZE, 100 + j * TILE_SIZE, TILE_SIZE, TILE_SIZE, color);
+      }
+    }
+  }
+
+  void count_tiles(Field field, uint32_t *tiles) {
+    for(int i = 0; i < 5; i++) tiles[i] = 0;
+
+    for(int i = 0; i < FIELD_SIZE; i++)
+      for(int j = 0; j < FIELD_SIZE; j++)
+        tiles[field[i][j]]++;
+  }
+
+  void process_intcode_results(IntcodeProgram *p, Field field, uint32_t *score) {
+    for(int i = p->result.size() - 1; i > 0; i-=3) {
+      Tile blocktype = (Tile) p->result[i];
+      int y = p->result[i-1], x = p->result[i-2];
+
+      if(x == -1 && y == 0) {
+        *score = blocktype;
+      } else {
+        field[x][y] = blocktype;
+      }
+    }
+  }
+
+  string day13() {
+    parse_program();
+    vector<memtype> program_template = parsed_program;
+    IntcodeProgram p;
+    p.program = program_template;
+
+    intcode_processor(&p, 0);
+
+    Field field;
+
+    for(int i = 0; i < FIELD_SIZE; i++)
+      for(int j = 0; j < FIELD_SIZE; j++)
+        field[i][j] = BLANK;
+
+    uint32_t score = 0;
+    process_intcode_results(&p, field, &score);
+
+    uint32_t num_tiles[5];
+
+    draw_field(field);
+    count_tiles(field, num_tiles);
+
+    uint32_t starting_blocks = num_tiles[BLOCK];
+
+    p.program = program_template;
+    p.program[0] = 2;
+    uint32_t num_iterations = 0;
+
+    while(num_tiles[BLOCK] > 0 && num_iterations < day_time * 300) {
+      int ball_x = 0, paddle_x = 0;
+      for(int i = 0; i < FIELD_SIZE; i++) {
+        for(int j = 0; j < FIELD_SIZE; j++) {
+          if (field[i][j] == BALL)
+            ball_x = i;
+          else if (field[i][j] == PADDLE)
+            paddle_x = i;
+        }
+      }
+
+      // Tilt the paddle towards the ball
+      int input = 0;
+      if (ball_x < paddle_x) input = -1;
+      if (ball_x > paddle_x) input = 1;
+
+      p.result.clear();
+      intcode_processor(&p, input);
+
+      process_intcode_results(&p, field, &score);
+      count_tiles(field, num_tiles);
+
+      num_iterations++;
+    }
+    FillRect(100, 80, 200, 20, olc::BLACK);
+    DrawStringDecal(olc::vf2d(100, 80), "Score: " + to_string(score));
+    draw_field(field);
+
+    if (num_tiles[BLOCK] == 0) {
+      day_complete = true;
+    }
+
+    return to_string(starting_blocks) + " starting blocks; Final score: " + to_string(score);
+  }
+
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -1451,7 +1560,7 @@ public:
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
     &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10,
-    &Advent2019::day11, &Advent2019::day12
+    &Advent2019::day11, &Advent2019::day12, &Advent2019::day13
 
   } {
     daynum = _daynum;
