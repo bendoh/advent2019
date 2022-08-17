@@ -23,6 +23,7 @@ vector<std::string> input_lines;
 bool is_interactive = false;
 bool is_visual = false;
 bool debug_intcode;
+uint8_t day16_phases = 100;
 
 // Border in SCREEN space
 uint16_t border = 10;
@@ -106,6 +107,18 @@ void parse_environment() {
   if (env_debug_intcode != NULL && strcmp(env_debug_intcode, "ON") == 0) {
     debug_intcode = true;
     cout << "Debugging Intcode programs!\n";
+  }
+
+  const char *env_day16_phases = getenv("AOC_DAY16_PHASES");
+
+  if (env_day16_phases != NULL) {
+    uint8_t int_value = atoi(env_day16_phases);
+
+    if (int_value > 0) {
+      day16_phases = int_value;
+
+      printf("Overridding day 16 phases to %d\n", day16_phases);
+    }
   }
 }
 
@@ -818,13 +831,10 @@ public:
 
 
       if (debug_intcode)
-        printf("[%lld] [%lld] [%s] ",
+        printf("[%d] [%lld] [%s] ",
             p->pc,
             intcode,
-            opcodes[opcode].c_str(),
-            modes[0] == ABSOLUTE ? "ABS" : modes[0] == IMMEDIATE ? "IMM" : "REL",
-            modes[1] == ABSOLUTE ? "ABS" : modes[1] == IMMEDIATE ? "IMM" : "REL",
-            modes[2] == ABSOLUTE ? "ABS" : modes[2] == IMMEDIATE ? "IMM" : "REL"
+            opcodes[opcode].c_str()
         );
 
       p->pc++;
@@ -1985,14 +1995,134 @@ public:
     );
   }
 
+  // Flawed frequency transmission... naive but general
+  void day16_fft(vector<uint8_t> *in_digits, vector<uint8_t> *out_digits, uint32_t phase) {
+    int num_digits = in_digits->size();
+    vector<int8_t> base_pattern = { 0, 1, 0, -1 };
+
+    for(int i = 0; i < num_digits; i++) {
+      int new_digit = 0;
+      int index = 0;
+
+      for (int j = 0; j < num_digits; j++) {
+        if(i == 0 || (j + 1) % (i + 1) == 0) index ++;
+
+        uint8_t midx = ((int) index) % 4;
+
+        // Skip 0s
+        if (midx % 2 == 0) continue;
+
+        uint8_t in_digit = (*in_digits)[j];
+
+        if (midx == 1)
+          new_digit += in_digit;
+        else
+          new_digit -= in_digit;
+
+      }
+
+      //printf("out[%d] = %d\n", i, abs(new_digit % 10));
+      out_digits->push_back(abs(new_digit % 10));
+    }
+  }
+
+  // This only works for determining digits in the last 1/4 of
+  // the input, i.e., offset > input_size * .75, as it's a simple sum
+  // of digits
+  void day16_faster_fft(vector<uint8_t> *in_digits, vector<uint8_t> *out_digits) {
+    int num_digits = in_digits->size();
+    int sum = 0;
+
+    // Get the sum ONCE, then each digit will be that sum minus previous digits
+    for(int i = 0; i < num_digits; i++) {
+      sum += (*in_digits)[i];
+    }
+
+    for (int j = 0; j < num_digits; j++) {
+      out_digits->push_back(sum % 10);
+      sum -= (*in_digits)[j];
+    }
+  }
+
+  string day16() {
+    vector<uint8_t> digits;
+    uint32_t offset = 0;
+
+    for(int i = 0; i < input_lines[0].size(); i++) {
+      uint8_t digit = input_lines[0][i] - '0';
+      if (i < 7) {
+        offset *= 10;
+        offset += digit;
+      }
+      digits.push_back(input_lines[0][i] - '0');
+    }
+
+    printf("Offset: %d  Input: ", offset);
+    for (uint8_t digit: digits) {
+      printf("%d", digit);
+    }
+
+    printf("\n");
+
+    vector<uint8_t> last = digits;
+    vector<uint8_t> next;
+
+    string part1_result = "";
+    for (int i = 0; i < day16_phases; i++) {
+      day16_fft(&last, &next, i);
+      printf("[After #%d] ", i + 1);
+      for (uint8_t digit: next) {
+        printf("%d", digit);
+      }
+      printf("\n");
+      last = next;
+      next.clear();
+    }
+
+    for (int i = 0; i < 8; i++)
+      part1_result += (last[i] + '0');
+
+    day_complete = 1;
+
+    printf("Part 2 offset: %d\n", offset);
+
+    last.clear();
+    next.clear();
+
+    for(int i = offset; i < digits.size() * 10000; i++)
+      last.push_back(digits[i % digits.size()]);
+
+    for (int i = 0; i < day16_phases; i++) {
+      string next_step;
+      for (int j = 0; j < 8; j++)
+        next_step += last[j] + '0';
+
+      printf("[%d] Running faster FFT on %d elements: %s\n", i, last.size(), next_step.c_str());
+      day16_faster_fft(&last, &next);
+
+      last = next;
+      next.clear();
+    }
+
+    string part2_result;
+
+    for (int i = 0; i < 8; i++)
+      part2_result += last[i] + '0';
+
+    printf("After %d phases, part2_result[%d-%d]: %s\n", day16_phases, offset, offset + 8, part2_result.c_str());
+
+    return "Part1: " + part1_result + "\nPart2: " + part2_result;
+  }
+
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
 
   Advent2019(int8_t _daynum) : days {
     &Advent2019::day0,
-    &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
-    &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10,
-    &Advent2019::day11, &Advent2019::day12, &Advent2019::day13, &Advent2019::day14, &Advent2019::day15
+    &Advent2019::day1,  &Advent2019::day2,  &Advent2019::day3,  &Advent2019::day4,  &Advent2019::day5,
+    &Advent2019::day6,  &Advent2019::day7,  &Advent2019::day8,  &Advent2019::day9,  &Advent2019::day10,
+    &Advent2019::day11, &Advent2019::day12, &Advent2019::day13, &Advent2019::day14, &Advent2019::day15,
+    &Advent2019::day16
 
   } {
     daynum = _daynum;
