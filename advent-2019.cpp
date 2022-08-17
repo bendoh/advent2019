@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <tgmath.h>
+#include <chrono>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine/olcPixelGameEngine.h"
@@ -21,14 +22,15 @@ using namespace std;
 
 vector<std::string> input_lines;
 bool is_interactive = false;
+
+// Are we running in a window or just in a terminal?
 bool is_visual = false;
+
 bool debug_intcode;
 uint8_t day16_phases = 100;
 
 // Border in SCREEN space
 uint16_t border = 10;
-
-olc::PixelGameEngine *pge;
 
 FILE *terminal;
 
@@ -202,7 +204,7 @@ public:
     string input;
 
     while(opcode != 99) {
-      if (is_visual || is_interactive) {
+      if (debug_intcode) {
         print_program(program, pc);
       }
 
@@ -550,7 +552,7 @@ public:
     uint32_t input_count = 0;
 
     while(opcode != 99) {
-      if (is_visual || is_interactive) {
+      if (debug_intcode) {
         print_program(program, pc);
       }
 
@@ -773,6 +775,9 @@ public:
       case RELATIVE:
         target = p->relative_base + p->program[p->pc++];
         break;
+      default:
+        printf("Invalid fetch mode found in program! Bye!\n");
+        exit(1);
     }
 
     return target;
@@ -817,8 +822,18 @@ public:
 
       opcode = intcode % 100;
 
-      if (opcode == 99)
+      if (debug_intcode)
+        printf("[%d] [%lld] [%s] ",
+            p->pc,
+            intcode,
+            opcodes[opcode].c_str()
+        );
+
+      if (opcode == 99) {
+        if (debug_intcode)
+          printf("\n");
         break;
+      }
 
       memtype mode = intcode / 100;
 
@@ -1546,6 +1561,7 @@ public:
     }
   }
 
+  int day13_speed = 300;
   string day13() {
     parse_program();
     vector<memtype> program_template = parsed_program;
@@ -1570,11 +1586,13 @@ public:
 
     uint32_t starting_blocks = num_tiles[BLOCK];
 
+    p.pc = 0;
     p.program = program_template;
     p.program[0] = 2;
+
     uint32_t num_iterations = 0;
 
-    while(num_tiles[BLOCK] > 0 && num_iterations < day_time * 300) {
+    while(num_tiles[BLOCK] > 0 && num_iterations < day_time * day13_speed) {
       int ball_x = 0, paddle_x = 0;
       for(int i = 0; i < FIELD_SIZE; i++) {
         for(int j = 0; j < FIELD_SIZE; j++) {
@@ -1585,22 +1603,38 @@ public:
         }
       }
 
+      vector<memtype> og_program = p.program;
+      vector<memtype> og_result = p.result;
+
       // Tilt the paddle towards the ball
       int input = 0;
       if (ball_x < paddle_x) input = -1;
       if (ball_x > paddle_x) input = 1;
 
       p.result.clear();
-      intcode_processor(&p, input);
 
+      intcode_processor(&p, input);
+      for (int i = 0; i < og_program.size(); i++) {
+        if (og_program[i] != p.program[i]) {
+          printf("PROGRAM [%d] %d != %d\n", i, og_program[i], p.program[i]);
+        }
+      }
+      for (int i = 0; i < og_result.size(); i++) {
+        if (og_result[i] != p.result[i]) {
+          printf("RESULT [%d] %d != %d\n", i, og_result[i], p.result[i]);
+        }
+      }
       process_intcode_results(&p, field, &score);
       count_tiles(field, num_tiles);
 
       num_iterations++;
     }
-    FillRect(100, 80, 200, 20, olc::BLACK);
-    DrawStringDecal(olc::vf2d(100, 80), "Score: " + to_string(score));
-    draw_field(field);
+
+    if (is_visual) {
+      FillRect(100, 80, 200, 20, olc::BLACK);
+      DrawStringDecal(olc::vf2d(100, 80), "Score: " + to_string(score));
+      draw_field(field);
+    }
 
     if (num_tiles[BLOCK] == 0) {
       day_complete = true;
@@ -2114,37 +2148,36 @@ public:
     return "Part1: " + part1_result + "\nPart2: " + part2_result;
   }
 
-  vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
+  float day_time = 0;
+  bool day_complete = false;
+  int8_t selected_day = 0;
 
-  Advent2019(int8_t _daynum) : days {
+  vector<string(Advent2019::*)()> days;
+
+  Advent2019(int8_t _selected_day) : days {
     &Advent2019::day0,
     &Advent2019::day1,  &Advent2019::day2,  &Advent2019::day3,  &Advent2019::day4,  &Advent2019::day5,
     &Advent2019::day6,  &Advent2019::day7,  &Advent2019::day8,  &Advent2019::day9,  &Advent2019::day10,
     &Advent2019::day11, &Advent2019::day12, &Advent2019::day13, &Advent2019::day14, &Advent2019::day15,
     &Advent2019::day16
-
   } {
-    daynum = _daynum;
+    selected_day = _selected_day;
 
     sAppName = "Bendoh's Advent 2019";
 
     printf("Starting up. There are %lu days attempted.\n", days.size());
 
-    if (daynum > -1) {
-      current_day = daynum;
-      printf("Only doing day %d\n", daynum);
+    if (selected_day > -1) {
+      current_day = selected_day;
+      printf("Only doing day %d\n", selected_day);
     } else {
       current_day = 0;
       printf("Doing all days!\n");
     }
   }
 
-	bool OnUserCreate() override {
-    string line;
-
-    parse_environment();
-
+  void init() {
     cout << "Starting up!\n";
 
     if (!isatty(fileno(stdin))) {
@@ -2159,18 +2192,90 @@ public:
         input_lines.push_back(string(linebuf));
       }
     }
+  }
 
-    if (input_lines.size() > 0 && daynum == 0) {
-      error_state = "Sorry, you can't specify stdin but not a day number";
+  void init_day() {
+    if ((selected_day == -1 || input_lines.empty()) && current_day > 0) {
+      string input_file = "inputs/2019/" + to_string(current_day);
+      cout << "Getting input from " << input_file << "\n";
+      FILE *input = fopen(input_file.c_str(), "r");
+
+      if (input == NULL) {
+        error_state = "Couldn't open puzzle input " + input_file + "\n";
+        return;
+      }
+
+      // If lines are longer than 50k we have a problem...
+      char input_line[1024 * 50];
+      input_lines = {};
+      while(fgets(input_line, 10240 * 50, input)) {
+        input_lines.push_back(string(input_line));
+      }
+      fclose(input);
     }
 
+    if(current_day == 15)
+      day15_init();
+
+    day_time = 0;
+    day_complete = false;
+  }
+
+  void run_day() {
+    string (Advent2019::*func)() = days[current_day];
+
+    init_day();
+
+    if (!error_state.empty())  {
+      cout << "Error: " << error_state;
+      exit(1);
+    }
+
+    std::chrono::time_point tp_start = std::chrono::system_clock::now();
+    std::chrono::time_point tp_last = tp_start;
+
+    std::chrono::duration<float> elapsed_time;
+
+    while(!day_complete) {
+      // Day is started, start computing next frame
+      string result = (this->*func)();
+
+      std::chrono::time_point tp_after = std::chrono::system_clock::now();
+      elapsed_time = tp_after - tp_last;
+
+      //cout << "Computing " << to_string(current_day) << " ...\n";
+      day_time += elapsed_time.count();
+
+      cout << "Result: " << result << "\n";
+
+      tp_last = tp_after;
+    }
+  }
+
+  void run() {
+    init();
+
+    if (selected_day == -1) {
+      for (current_day = 0; current_day < days.size(); current_day++) {
+        run_day();
+      }
+    } else {
+      current_day = selected_day;
+      run_day();
+    }
+
+  }
+
+	bool OnUserCreate() override {
+    init();
+
+    if (input_lines.size() > 0 && selected_day == 0) {
+      error_state = "Sorry, you can't specify stdin but not a day number";
+    }
     return true;
 	}
 
   bool starting_day = true;
-  float day_time = 0;
-  bool day_complete = false;
-  int8_t daynum = 0;
 
 	bool OnUserUpdate(float fElapsedTime) override {
     if (!error_state.empty()) {
@@ -2185,29 +2290,11 @@ public:
 
       if (starting_day) {
         cout << "Day " << to_string(current_day) << " started\n";
-        if ((daynum == -1 || input_lines.empty()) && current_day > 0) {
-          string input_file = "inputs/2019/" + to_string(current_day);
-          cout << "Getting input from " << input_file << "\n";
-          FILE *input = fopen(input_file.c_str(), "r");
 
-          if (input == NULL) {
-            error_state = "Couldn't open puzzle input " + input_file + "\n";
-            return true;
-          }
+        init_day();
 
-          // If lines are longer than 50k we have a problem...
-          char input_line[1024 * 50];
-          input_lines = {};
-          while(fgets(input_line, 10240 * 50, input))
-            input_lines.push_back(string(input_line));
-          fclose(input);
-        }
-        if(current_day == 15)
-          day15_init();
-        day_time = 0;
         // Day is started, start computing next frame
         starting_day = false;
-        day_complete = false;
       } else {
         //cout << "Computing " << to_string(current_day) << " ...\n";
         day_time += fElapsedTime;
@@ -2220,7 +2307,7 @@ public:
           results[current_day] = result;
           cout << result << "\n";
 
-          if (daynum == -1) {
+          if (selected_day == -1) {
             if (current_day == days.size() - 1) {
               current_day = -1; // We are done.
             } else {
@@ -2235,7 +2322,7 @@ public:
     }
 
     for (map<uint8_t, string>::iterator it=results.begin(); it!=results.end(); ++it) {
-      uint32_t y_offset = daynum == -1 ? 20 * it->first : 0;
+      uint32_t y_offset = selected_day == -1 ? 20 * it->first : 0;
       DrawStringDecal(olc::vf2d(5, y_offset + border), "Day " + to_string(it->first));
       DrawStringDecal(olc::vf2d(60, y_offset + border), it->second);
     }
@@ -2246,14 +2333,18 @@ public:
 
 
 int main(const int argc, const char **argv) {
-  int8_t daynum = argc > 1 ? stoi(argv[1]) : -1;
+  int8_t selected_day = argc > 1 ? stoi(argv[1]) : -1;
 
-  Advent2019 program(daynum);
+  parse_environment();
 
-  program.Construct(600, 400, 2, 2);
-  program.Start();
+  Advent2019 program(selected_day);
 
-  pge = &program;
+  if (is_visual) {
+    program.Construct(600, 400, 2, 2);
+    program.Start();
+  } else {
+    program.run();
+  }
 
   return 0;
 }
