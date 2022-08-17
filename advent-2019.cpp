@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <stdlib.h>
 #include <math.h>
+#include <tgmath.h>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine/olcPixelGameEngine.h"
@@ -21,6 +22,7 @@ using namespace std;
 vector<std::string> input_lines;
 bool is_interactive = false;
 bool is_visual = false;
+bool debug_intcode;
 
 // Border in SCREEN space
 uint16_t border = 10;
@@ -43,6 +45,8 @@ std::vector<std::string> regex_split(const std::string str, const std::string re
 
 
 const char *trim_ws = " \t\n\r\f\v";
+
+uint16_t map_scale = 5;
 
 // trim from end of string (right)
 inline std::string& rtrim(std::string& s, const char* t = trim_ws)
@@ -95,6 +99,13 @@ void parse_environment() {
 
   if (env_visual != NULL && strcmp(env_visual, "ON") == 0) {
     is_visual = true;
+  }
+
+  const char *env_debug_intcode = getenv("AOC_DEBUG_INTCODE");
+
+  if (env_debug_intcode != NULL && strcmp(env_debug_intcode, "ON") == 0) {
+    debug_intcode = true;
+    cout << "Debugging Intcode programs!\n";
   }
 }
 
@@ -757,31 +768,46 @@ public:
   memtype fetch_param(IntcodeProgram *p, Mode mode) {
     uint32_t target = fetch_target(p, mode);
 
-    /*
-    printf("Fetching parameter with mode %s from target %d: %lld\n",
-        mode == ABSOLUTE ? "ABS" : mode == IMMEDIATE ? "IMM" : "REL",
-        target,
-        p->program[target]
-    );
-    */
+    if (debug_intcode)
+      printf(" %s [%d] = %lld ",
+          mode == ABSOLUTE ? "ABS" : mode == IMMEDIATE ? "IMM" : "REL",
+          target,
+          p->program[target]
+      );
 
     return p->program[target];
   }
+
+  map <memtype, string> opcodes = {
+    {1, "ADD"},
+    {2, "MUL"},
+    {3, "LOAD"},
+    {4, "OUT"},
+    {5, "JNZ"},
+    {6, "JEZ"},
+    {7, "SLT"},
+    {8, "SEQ"},
+    {9, "SRB"},
+    {99, "HALT"}
+  };
 
   void intcode_processor(IntcodeProgram *p, memtype input) {
     memtype opcode = 0;
     bool consumed_input = false;
 
-    while(opcode != 99) {
+    while(1) {
+      memtype intcode = p->program[p->pc];
+
       if (is_interactive) {
         fgetc(terminal);
       }
 
-//      printf("program[%lld] = %lld\n", p->pc, p->program[p->pc]);
-      opcode = p->program[p->pc] % 100;
-      memtype mode = p->program[p->pc] / 100;
+      opcode = intcode % 100;
 
-      p->pc++;
+      if (opcode == 99)
+        break;
+
+      memtype mode = intcode / 100;
 
       Mode modes[3] = {
         // Positions 1..N
@@ -790,17 +816,18 @@ public:
         (Mode) ((mode / 100) % 10)
       };
 
-      if (opcode == 99)
-        break;
 
-/*
-      printf("Opcode %lld, Modes: %s/%s/%s\n",
-          opcode,
-          modes[0] == ABSOLUTE ? "ABS" : modes[0] == IMMEDIATE ? "IMM" : "REL",
-          modes[1] == ABSOLUTE ? "ABS" : modes[1] == IMMEDIATE ? "IMM" : "REL",
-          modes[2] == ABSOLUTE ? "ABS" : modes[2] == IMMEDIATE ? "IMM" : "REL"
+      if (debug_intcode)
+        printf("[%lld] [%lld] [%s] ",
+            p->pc,
+            intcode,
+            opcodes[opcode].c_str(),
+            modes[0] == ABSOLUTE ? "ABS" : modes[0] == IMMEDIATE ? "IMM" : "REL",
+            modes[1] == ABSOLUTE ? "ABS" : modes[1] == IMMEDIATE ? "IMM" : "REL",
+            modes[2] == ABSOLUTE ? "ABS" : modes[2] == IMMEDIATE ? "IMM" : "REL"
         );
-        */
+
+      p->pc++;
 
       if(opcode == 1) { // Addition
         memtype
@@ -808,7 +835,9 @@ public:
           arg2 = fetch_param(p, modes[1]),
           dest = fetch_target(p, modes[2]);
         p->program[dest] = arg1 + arg2;
-//        printf("%lld + %lld = %lld -> program[%lld]\n", arg1, arg2, p->program[dest], dest);
+
+        if (debug_intcode)
+          printf(" %lld + %lld = %lld -> program[%lld]", arg1, arg2, p->program[dest], dest);
       }
 
       else if(opcode == 2) { // Multiplication
@@ -817,42 +846,51 @@ public:
           arg2 = fetch_param(p, modes[1]),
           dest = fetch_target(p, modes[2]);
         p->program[dest] = arg1 * arg2;
-//        printf("%lld * %lld = %lld -> program[%d]\n", arg1, arg2, p->program[dest], dest);
+
+        if (debug_intcode)
+          printf(" %lld * %lld = %lld -> program[%lld]", arg1, arg2, p->program[dest], dest);
       }
 
       else if (opcode == 3) {
         if (!consumed_input) {
-          uint32_t position;
+          memtype position;
           position = p->program[p->pc++];
           if (modes[0] == RELATIVE) {
             position += p->relative_base;
           }
           p->program[position] = input;
-//          printf("p->program[%lld] = %d\n", position, input);
-//         printf("Now p->program[%d] = %lld\n", position, p->program[position]);
+
+          if (debug_intcode)
+            printf(" p->program[%lld] = %lld", position, input);
+
           consumed_input = true;
         } else {
           p->state = INPUT;
           p->pc--; // Restart here
-          //printf("Waiting for next input...\n");
+          if (debug_intcode)
+            printf("Waiting for next input...\n");
           return;
         }
       }
 
       else if (opcode == 4) {
         memtype output = fetch_param(p, modes[0]);
-//        printf("Writing output %lld\n", output);
         p->result.push_back(output);
-//        printf("Wrote output: %lld\n", p->result.back());
+
+        if (debug_intcode)
+          printf(" OUTPUT %lld", p->result.back());
       }
 
       else if (opcode == 5 || opcode == 6) {
         memtype arg1 = fetch_param(p, modes[0]),
                 dest = fetch_param(p, modes[1]);
 
-        // printf("%d %s 0 -> %d\n", arg1, opcode == 5 ? "!=" : "==", dest);
+        if (debug_intcode)
+          printf(" %lld %s 0 -> %lld", arg1, opcode == 5 ? "!=" : "==", dest);
+
         if((opcode == 5 && arg1 != 0) || (opcode == 6 && arg1 == 0)) {
-//          printf("Jumping to %lld\n",  dest);
+          if (debug_intcode)
+            printf("; Jumping to %lld",  dest);
           p->pc = dest;
         }
       }
@@ -863,20 +901,29 @@ public:
                 dest = fetch_target(p, modes[2]);
 
         p->program[dest] = (opcode == 7 && arg1 < arg2) || (opcode == 8 && arg1 == arg2) ? 1 : 0;
-//         printf("%lld %s %lld = [%lld] %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, dest, p->program[dest]);
+
+        if (debug_intcode)
+          printf(" %lld %s %lld = %lld -> %lld\n", arg1, opcode == 7 ? "<" : "==", arg2, p->program[dest], dest);
       }
 
       else if (opcode == 9) {
         memtype arg1 = fetch_param(p, modes[0]);
-        // printf("Relative base: %d", p->relative_base);
+
+        if (debug_intcode)
+
+          printf(" %d", p->relative_base);
         p->relative_base += arg1;
-        // printf(" += %d => %d\n", arg1, p->relative_base);
+
+        if (debug_intcode)
+          printf(" += %lld => %d", arg1, p->relative_base);
       }
 
       else {
         printf("[ERROR] Invalid opcode %lld!\n", opcode);
       }
 
+      if (debug_intcode)
+        printf("\n");
       opcode = p->program[p->pc];
     }
 
@@ -1552,6 +1599,391 @@ public:
     return to_string(starting_blocks) + " starting blocks; Final score: " + to_string(score);
   }
 
+  struct Term {
+    string name;
+    uint32_t quantity;
+
+    Term() {
+      name = "";
+      quantity = 0;
+    }
+
+    Term(string v) {
+      char _name[250];
+      sscanf(v.c_str(), "%d %s", &quantity, _name);
+
+      name = string(_name);
+    }
+  };
+  struct Formula {
+    vector<Term> inputs;
+    uint8_t level = 0;
+    Term output;
+  };
+
+  map<string, Formula> formulae;
+  map<string, uint64_t> requirements;
+  map<string, uint64_t> surplus;
+
+  /*
+  function requiredOreToMakeProduct(product, qty) {
+    var recipe = recipes.filter(r => r.result.name == product)[0];
+    var existing = surplus.has(product) ? surplus.get(product) : 0;
+    var multiple = Math.ceil(Math.max((qty - existing),0) / recipe.result.qty);
+    var extra = (recipe.result.qty * multiple) - (qty - existing);
+    if (product != "ORE") { surplus.set(product,extra); }
+    var ore = 0;
+    for (const ingr of recipe.ingredients) {
+        if (ingr.name == "ORE") {
+            ore += multiple * ingr.qty;
+        } else {
+            ore += requiredOreToMakeProduct(ingr.name, multiple * ingr.qty);
+        }
+    }
+    return ore;
+}
+*/
+
+  uint64_t find_requirements(string name, uint64_t qty = 1) {
+    Formula f = formulae[name];
+    uint64_t extra = surplus[name];
+
+//    printf("finding requirements for %llu of %s (%lld extra)\n", qty, name.c_str(), extra);
+    uint64_t multiplier = (qty + f.output.quantity - extra - 1) / f.output.quantity;
+
+    if (name != "ORE") {
+      surplus[name] = f.output.quantity * multiplier - (qty - extra);
+    }
+
+    uint64_t total_ore = 0;
+
+    for(auto &i: f.inputs) {
+      if (i.name == "ORE") {
+        total_ore += multiplier * i.quantity;
+      } else {
+        total_ore += find_requirements(i.name, multiplier * i.quantity);
+      }
+    }
+
+    return total_ore;
+  }
+
+  string day14() {
+    formulae.clear();
+    requirements.clear();
+
+    for (auto &line: input_lines) {
+      vector<string> io = regex_split(line, " => ");
+      vector<string> inputs = regex_split(io[0], ",");
+      Formula f;
+
+      for(auto &input: inputs) {
+        f.inputs.push_back(Term(input));
+      }
+
+      f.output = Term(io[1]);
+      formulae[f.output.name] = f;
+    }
+
+    uint64_t ore_for_one = find_requirements("FUEL");
+
+    printf("Total ore required for 1 FUEL: %llu\n", ore_for_one);
+
+    uint64_t starting_ore = 1000000000000;
+    uint64_t max_fuel = starting_ore / ore_for_one;
+
+    printf("Maximum fuel we could make: %lld\n", max_fuel);
+
+    while(1) {
+      surplus.clear();
+      uint64_t required_ore = find_requirements("FUEL", max_fuel);
+      int64_t diff = starting_ore - required_ore;
+
+      printf("Ore required for %llu fuel: %llu (ore remaining: %lld)\n", max_fuel, required_ore, diff);
+
+      if (diff > 0) {
+        uint64_t error_scale, error_adjust;
+        diff /= ore_for_one;
+
+        if (diff >= 10) {
+          error_scale = (int) log10(diff);
+          error_adjust = pow(10, error_scale);
+        } else {
+          error_scale = 0;
+          error_adjust = 1;
+        }
+
+        max_fuel += error_adjust;
+        printf("Diff=%lld, Adjusting by 10^%llu = %llu: %llu\n", diff, error_scale, error_adjust, max_fuel);
+      } else {
+        max_fuel --;
+        break;
+      }
+    }
+    day_complete = true;
+
+    return "Total required: " + to_string(ore_for_one) + ";  Max fuel: " + to_string(max_fuel);
+  }
+
+  enum Direction { NONE, NORTH, SOUTH, WEST, EAST };
+  map<Direction, string> dir_strings = {{NORTH, "NORTH"}, {SOUTH, "SOUTH"}, {WEST, "WEST"}, {EAST, "EAST"}};
+
+  map <Direction, Direction> turns = {{NORTH, EAST}, {EAST, SOUTH}, {SOUTH, WEST}, {WEST, NORTH}};
+
+#define DROID_MAP_SIZE 50
+  uint8_t day15_map[DROID_MAP_SIZE][DROID_MAP_SIZE];
+
+  struct Droid {
+    uint8_t map[DROID_MAP_SIZE][DROID_MAP_SIZE];
+    uint16_t x = DROID_MAP_SIZE / 2;
+    uint16_t y = DROID_MAP_SIZE / 2;
+    uint16_t id = 0;
+
+    IntcodeProgram program;
+
+    Droid() {
+      printf("Initializing droid with empty map...");
+      for(int _x = 0; _x < DROID_MAP_SIZE; _x++)
+        for(int _y = 0; _y < DROID_MAP_SIZE; _y++)
+          map[_x][_y] = 0;
+
+      set(0, 0, 1);
+    }
+
+    Droid(IntcodeProgram p) : Droid() {
+      program = p;
+    }
+
+    uint8_t get(int16_t dx, int16_t dy) {
+      return map[x + dx][y + dy];
+    }
+
+    void set(int16_t dx, int16_t dy, uint8_t val) {
+      map[x + dx][y + dy] = val;
+    }
+
+    uint8_t get() {
+      return map[x][y];
+    }
+  };
+
+  Droid winning_droid;
+
+  float day15_speed = 150;
+  int day15_steps = 0;
+  int found_steps = 0;
+  vector<Droid> day15_droids;
+
+  int draw_day15_map() {
+    int unfilled_spots = 0;
+
+    for(uint16_t _x = 0; _x < DROID_MAP_SIZE; _x++) {
+      for(uint16_t _y = 0; _y < DROID_MAP_SIZE; _y++) {
+        olc::Pixel color = olc::BLACK;
+
+        if (day15_map[_x][_y] == 1) color = olc::RED;
+        if (day15_map[_x][_y] == 2) {
+          color = olc::GREEN;
+          unfilled_spots++;
+        }
+        if (day15_map[_x][_y] == 3) color = olc::YELLOW;
+        if (day15_map[_x][_y] == 4) color = olc::WHITE;
+        if (day15_map[_x][_y] > 4) color = olc::MAGENTA;
+
+        if(_x == DROID_MAP_SIZE / 2 && _y == DROID_MAP_SIZE / 2)
+          color = olc::CYAN;
+
+//        printf("Drawing map <%d, %d> for %d\n", _x, _y, day15_map[_x][_y]);
+        FillRect(_x * map_scale, _y * map_scale, map_scale, map_scale, color);
+      }
+    }
+
+    return unfilled_spots;
+  }
+
+  bool find_oxygen_system() {
+    int stepped_droids = 0;
+
+    if (day_time * day15_speed < day15_steps) {
+      return false;
+    }
+
+    printf("\n[%d] Processing %lu\n", day15_steps, day15_droids.size());
+
+    vector<Droid> kept_droids;
+
+/*
+    for(int pair = 0; pair < day15_droids.size() - 1; pair++) {
+      Droid *d1 = &day15_droids[pair], *d2 = &day15_droids[pair+1];
+
+      for(int i = 0; i < d1->program.program.size(); i++)
+        if(d1->program.program[i] != d2->program.program[i])
+          printf("Program differences: [%d/%d] [%d] %lld != %lld\n", pair, pair+1, i, d1->program.program[i], d2->program.program[i]);
+    }
+    */
+    for (auto &droid: day15_droids) {
+      int steps = 0;
+      int forks = 0;
+
+      // Old position is now just seen
+      if(day15_map[droid.x][droid.y] != 4)
+        day15_map[droid.x][droid.y] = 2;
+
+      Droid og_droid = droid;
+      IntcodeProgram p = droid.program;
+
+      printf("[%d] is now at <%d, %d>\n", droid.id, droid.x, droid.y);
+      Direction dir = NORTH;
+
+      do {
+        int step_x = dir == EAST ? 1 : dir == WEST ? -1 : 0;
+        int step_y = dir == NORTH ? -1 : dir == SOUTH ? 1 : 0;
+
+        printf("[%d/%d] %s, num_steps=%d At %d,%d: %d\n", droid.id, steps, dir_strings[dir].c_str(), day15_steps, og_droid.x+step_x, og_droid.y+step_y, og_droid.get(step_x, step_y));
+
+        if (og_droid.get(step_x, step_y) == 0) {
+          IntcodeProgram fork = p;
+          intcode_processor(&fork, dir);
+
+          memtype result = fork.result.back();
+
+          printf("[%d/%d] trying %s (<%d, %d>) to <%d, %d>: %lld\n", og_droid.id, steps, dir_strings[dir].c_str(), step_x, step_y, og_droid.x + step_x, og_droid.y + step_y, result);
+
+          if (result == 0) {
+            // We hit a wall, this isn't the right way
+            og_droid.set(step_x, step_y, 1);
+            droid = og_droid;
+            //droid.set(step_x, step_y, 1);
+            day15_map[og_droid.x + step_x][og_droid.y + step_y] = 1;
+          }
+          else if (result == 1 || result == 2) {
+            Droid *next_droid = &droid;
+            Droid new_droid = og_droid;
+
+            if (forks > 0) {
+              // The original droid ref already stepped away but we can also
+              // go in another direction; fork it off
+              new_droid.id = day15_droids.size() + forks - 1;
+              printf("[%d] NEW at <%d, %d>\n", new_droid.id, new_droid.x, new_droid.y);
+              next_droid = &new_droid;
+            }
+            next_droid->program = fork;
+
+            next_droid->x += step_x;
+            next_droid->y += step_y;
+
+            next_droid->set(0, 0, 1);
+
+            day15_map[next_droid->x][next_droid->y] = 3;
+
+            kept_droids.push_back(*next_droid);
+
+            forks++;
+
+            if (result == 2) {
+              printf("FOUND! %d,%d\n", droid.x, droid.y);
+              winning_droid = droid;
+              found_steps = day15_steps + 1;
+              day15_map[next_droid->x][next_droid->y] = 4;
+            }
+          } else {
+            printf("Unexpected result from intcode program: %lld\n", result);
+            exit(1);
+          }
+
+          steps++;
+        }
+
+        dir = turns[dir];
+      } while (dir != NORTH);
+
+      if (steps > 0) {
+        printf("[%d] took a step\n", og_droid.id);
+        stepped_droids++;
+      } else {
+        // printf("[%d] hit a dead-end!\n", droid.id);
+      }
+    }
+
+    if(stepped_droids > 0)
+      day15_steps++;
+
+    // printf("%d droids took a step; adding %lu droids\n\n", stepped_droids, new_droids.size());
+
+    day15_droids.clear();
+    for (auto &kept_droid: kept_droids)
+        day15_droids.push_back(kept_droid);
+
+    return stepped_droids == 0;
+  }
+
+  void day15_init() {
+    parse_program();
+    vector<memtype> program_template = parsed_program;
+
+    IntcodeProgram droid_program;
+    droid_program.program = program_template;
+
+    day15_steps = 0;
+    day15_droids.clear();
+
+    Droid droid0 = Droid(droid_program);
+    day15_droids.push_back(droid0);
+
+    for(int i = 0; i < DROID_MAP_SIZE; i++) {
+      for(int j = 0; j < DROID_MAP_SIZE; j++) {
+        day15_map[i][j] = 0;
+      }
+    }
+
+    day15_map[droid0.x][droid0.y] = 3;
+  }
+
+  int day15_flood_time = 0;
+
+  void fill_map(int x, int y, int steps = 0) {
+    if (day_time * day15_speed < (day15_steps + steps)) {
+      return;
+    }
+
+    Direction dir = NORTH;
+    day15_map[x][y] += 5;
+
+    int forks = 0;
+
+    do {
+      int step_x = dir == EAST ? 1 : dir == WEST ? -1 : 0;
+      int step_y = dir == NORTH ? -1 : dir == SOUTH ? 1 : 0;
+
+      if(day15_map[x+step_x][y+step_y] == 2) {
+        forks++;
+        fill_map(x+step_x, y+step_y, steps+1);
+      }
+
+      dir = turns[dir];
+    } while (dir != NORTH);
+
+    if (forks == 0 && steps > day15_flood_time)
+      day15_flood_time = steps;
+  }
+
+  string day15() {
+    bool oxygen_found = find_oxygen_system();
+
+    if (oxygen_found) {
+      fill_map(winning_droid.x, winning_droid.y);
+    }
+
+    int unfilled_spots = draw_day15_map();
+
+    if (oxygen_found && unfilled_spots == 0)
+      day_complete = true;
+
+    return (
+      "Minimum steps to find system: " + to_string(found_steps) + "\n" +
+      "Flood time: " + to_string(day15_flood_time)
+    );
+  }
 
   vector<string(Advent2019::*)()> days;
   int8_t current_day = -1;
@@ -1560,7 +1992,7 @@ public:
     &Advent2019::day0,
     &Advent2019::day1, &Advent2019::day2, &Advent2019::day3, &Advent2019::day4, &Advent2019::day5,
     &Advent2019::day6, &Advent2019::day7, &Advent2019::day8, &Advent2019::day9, &Advent2019::day10,
-    &Advent2019::day11, &Advent2019::day12, &Advent2019::day13
+    &Advent2019::day11, &Advent2019::day12, &Advent2019::day13, &Advent2019::day14, &Advent2019::day15
 
   } {
     daynum = _daynum;
@@ -1640,17 +2072,19 @@ public:
             input_lines.push_back(string(input_line));
           fclose(input);
         }
+        if(current_day == 15)
+          day15_init();
         day_time = 0;
         // Day is started, start computing next frame
         starting_day = false;
         day_complete = false;
       } else {
-        cout << "Computing " << to_string(current_day) << " ...\n";
+        //cout << "Computing " << to_string(current_day) << " ...\n";
         day_time += fElapsedTime;
 
         // Day is started, start computing next frame
         string result = (this->*func)();
-        cout << "Computed!\n";
+        //cout << "Computed!\n";
 
         if (day_complete) {
           results[current_day] = result;
