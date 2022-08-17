@@ -815,12 +815,12 @@ public:
 
     while(1) {
       memtype intcode = p->program[p->pc];
+      p->pc++;
 
       if (is_interactive) {
         fgetc(terminal);
       }
 
-      opcode = intcode % 100;
 
       if (debug_intcode)
         printf("[%d] [%lld] [%s] ",
@@ -829,12 +829,14 @@ public:
             opcodes[opcode].c_str()
         );
 
+
       if (opcode == 99) {
         if (debug_intcode)
           printf("\n");
         break;
       }
 
+      opcode = intcode % 100;
       memtype mode = intcode / 100;
 
       Mode modes[3] = {
@@ -844,6 +846,8 @@ public:
         (Mode) ((mode / 100) % 10)
       };
 
+      if (opcode == 99)
+        break;
 
       if (debug_intcode)
         printf("[%d] [%lld] [%s] ",
@@ -851,8 +855,6 @@ public:
             intcode,
             opcodes[opcode].c_str()
         );
-
-      p->pc++;
 
       if(opcode == 1) { // Addition
         memtype
@@ -878,7 +880,7 @@ public:
 
       else if (opcode == 3) {
         if (!consumed_input) {
-          memtype position;
+          uint32_t position;
           position = p->program[p->pc++];
           if (modes[0] == RELATIVE) {
             position += p->relative_base;
@@ -1561,86 +1563,86 @@ public:
     }
   }
 
-  int day13_speed = 300;
+  // How many iterations per frame we'll do
+  int day13_speed = 10;
+  Field day13_field;
+
+  IntcodeProgram day13_program;
+  uint32_t day13_starting_blocks = 0;
+  uint32_t day13_blocks = 0;
+  uint32_t day13_score = 0;
+
   string day13() {
     parse_program();
     vector<memtype> program_template = parsed_program;
-    IntcodeProgram p;
-    p.program = program_template;
-
-    intcode_processor(&p, 0);
-
-    Field field;
-
-    for(int i = 0; i < FIELD_SIZE; i++)
-      for(int j = 0; j < FIELD_SIZE; j++)
-        field[i][j] = BLANK;
-
-    uint32_t score = 0;
-    process_intcode_results(&p, field, &score);
 
     uint32_t num_tiles[5];
 
-    draw_field(field);
-    count_tiles(field, num_tiles);
+    // First time around, just figure out the field
+    if (day13_blocks == 0) {
+      day13_program.program = program_template;
+      intcode_processor(&day13_program, 0);
 
-    uint32_t starting_blocks = num_tiles[BLOCK];
+      for(int i = 0; i < FIELD_SIZE; i++)
+        for(int j = 0; j < FIELD_SIZE; j++)
+          day13_field[i][j] = BLANK;
 
-    p.pc = 0;
-    p.program = program_template;
-    p.program[0] = 2;
+      uint32_t score;
+      process_intcode_results(&day13_program, day13_field, &score);
+      draw_field(day13_field);
+      count_tiles(day13_field, num_tiles);
+      day13_starting_blocks = day13_blocks = num_tiles[BLOCK];
+
+      day13_program.program = program_template;
+      day13_program.program[0] = 2;
+      printf("Found %d starting blocks; inserting a quarter...\n", day13_blocks);
+      return to_string(day13_blocks) + " starting blocks";
+    }
 
     uint32_t num_iterations = 0;
 
-    while(num_tiles[BLOCK] > 0 && num_iterations < day_time * day13_speed) {
+    while(day13_blocks > 0 && num_iterations < day13_speed) {
       int ball_x = 0, paddle_x = 0;
       for(int i = 0; i < FIELD_SIZE; i++) {
         for(int j = 0; j < FIELD_SIZE; j++) {
-          if (field[i][j] == BALL)
+          if (day13_field[i][j] == BALL)
             ball_x = i;
-          else if (field[i][j] == PADDLE)
+          else if (day13_field[i][j] == PADDLE)
             paddle_x = i;
         }
       }
-
-      vector<memtype> og_program = p.program;
-      vector<memtype> og_result = p.result;
 
       // Tilt the paddle towards the ball
       int input = 0;
       if (ball_x < paddle_x) input = -1;
       if (ball_x > paddle_x) input = 1;
 
-      p.result.clear();
+      day13_program.result.clear();
 
-      intcode_processor(&p, input);
-      for (int i = 0; i < og_program.size(); i++) {
-        if (og_program[i] != p.program[i]) {
-          printf("PROGRAM [%d] %d != %d\n", i, og_program[i], p.program[i]);
-        }
-      }
-      for (int i = 0; i < og_result.size(); i++) {
-        if (og_result[i] != p.result[i]) {
-          printf("RESULT [%d] %d != %d\n", i, og_result[i], p.result[i]);
-        }
-      }
-      process_intcode_results(&p, field, &score);
-      count_tiles(field, num_tiles);
+      intcode_processor(&day13_program, input);
+
+      uint32_t score = 0;
+      process_intcode_results(&day13_program, day13_field, &score);
+
+      if (score > day13_score) day13_score = score;
+
+      count_tiles(day13_field, num_tiles);
+      day13_blocks = num_tiles[BLOCK];
 
       num_iterations++;
     }
 
     if (is_visual) {
       FillRect(100, 80, 200, 20, olc::BLACK);
-      DrawStringDecal(olc::vf2d(100, 80), "Score: " + to_string(score));
-      draw_field(field);
+      DrawStringDecal(olc::vf2d(100, 80), "Score: " + to_string(day13_score));
+      draw_field(day13_field);
     }
 
-    if (num_tiles[BLOCK] == 0) {
+    if (day13_blocks == 0) {
       day_complete = true;
     }
 
-    return to_string(starting_blocks) + " starting blocks; Final score: " + to_string(score);
+    return to_string(day13_starting_blocks) + " starting blocks; Final score: " + to_string(day13_score);
   }
 
   struct Term {
