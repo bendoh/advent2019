@@ -2257,6 +2257,8 @@ public:
   void run() {
     init();
 
+    day13_speed = 10000;
+
     if (selected_day == -1) {
       for (current_day = 0; current_day < days.size(); current_day++) {
         run_day();
