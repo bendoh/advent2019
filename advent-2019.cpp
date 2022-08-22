@@ -14,6 +14,7 @@
 #include <math.h>
 #include <tgmath.h>
 #include <chrono>
+#include <tuple>
 
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine/olcPixelGameEngine.h"
@@ -66,6 +67,18 @@ struct Point {
   int32_t z = 0;
 
   int32_t manhattan_distance() { return abs(x) + abs(y) + abs(z); }
+
+  Point() : Point(0, 0, 0) {}
+
+  Point(int32_t _x, int32_t _y) {
+    x = _x;
+    y = _y;
+  }
+  Point(int32_t _x, int32_t _y, int32_t _z) : Point(_x, _y) {
+    z = _z;
+  }
+
+  bool operator==(const Point &o) { return x == o.x && y == o.y && z == o.z; }
 };
 
 
@@ -888,7 +901,7 @@ public:
           p->program[position] = input;
 
           if (debug_intcode)
-            printf(" p->program[%lld] = %lld", position, input);
+            printf(" p->program[%d] = %lld", position, input);
 
           consumed_input = true;
         } else {
@@ -1774,7 +1787,8 @@ public:
   enum Direction { NONE, NORTH, SOUTH, WEST, EAST };
   map<Direction, string> dir_strings = {{NORTH, "NORTH"}, {SOUTH, "SOUTH"}, {WEST, "WEST"}, {EAST, "EAST"}};
 
-  map <Direction, Direction> turns = {{NORTH, EAST}, {EAST, SOUTH}, {SOUTH, WEST}, {WEST, NORTH}};
+  map <Direction, Direction> right_turns = {{NORTH, EAST}, {EAST, SOUTH}, {SOUTH, WEST}, {WEST, NORTH}};
+  map <Direction, Direction> left_turns = {{NORTH, WEST}, {WEST, SOUTH}, {SOUTH, EAST}, {EAST, NORTH}};
 
 #define DROID_MAP_SIZE 50
   uint8_t day15_map[DROID_MAP_SIZE][DROID_MAP_SIZE];
@@ -1940,7 +1954,7 @@ public:
           steps++;
         }
 
-        dir = turns[dir];
+        dir = right_turns[dir];
       } while (dir != NORTH);
 
       if (steps > 0) {
@@ -2006,7 +2020,7 @@ public:
         fill_map(x+step_x, y+step_y, steps+1);
       }
 
-      dir = turns[dir];
+      dir = right_turns[dir];
     } while (dir != NORTH);
 
     if (forks == 0 && steps > day15_flood_time)
@@ -2133,7 +2147,7 @@ public:
       for (int j = 0; j < 8; j++)
         next_step += last[j] + '0';
 
-      printf("[%d] Running faster FFT on %d elements: %s\n", i, last.size(), next_step.c_str());
+      printf("[%d] Running faster FFT on %lu elements: %s\n", i, last.size(), next_step.c_str());
       day16_faster_fft(&last, &next);
 
       last = next;
@@ -2150,6 +2164,420 @@ public:
     return "Part1: " + part1_result + "\nPart2: " + part2_result;
   }
 
+  /**
+   * Day 17!
+   */
+  struct PossiblePath {
+    Direction dir;
+    Point pos;
+    vector<Point> points = {};
+    vector<string> steps = {};
+    int num_steps = 0;
+  };
+
+  char **day17_map = NULL;
+  int day17_total_points = 0;
+  Point day17_dims, day17_start;
+  vector<memtype> day17_program;
+  IntcodeProgram day17_intcode;
+  vector<PossiblePath> day17_paths;
+  vector<PossiblePath> day17_fullpaths;
+  vector<PossiblePath> day17_kept_paths;
+  bool day17_robot_running = false;
+  uint32_t day17_alignment_parameter_sum = 0;
+  string day17_compressed_command[4];
+  float day17_speed = 200;
+  string day17_message = "";
+
+  int day17_route_step() {
+    int total_steps = 0;
+    int expected_points = day17_paths[0].points.size() + 1;
+
+    for(auto path: day17_paths) {
+      uint8_t num_steps = 0; // How many steps this path did take
+
+      vector<Direction> directions = { path.dir, left_turns[path.dir], right_turns[path.dir] };
+
+      for (auto &td: directions) {
+        int step_x = td == EAST ? 1 : td == WEST ? -1 : 0;
+        int step_y = td == NORTH ? -1 : td == SOUTH ? 1 : 0;
+
+        int next_x = path.pos.x + step_x;
+        int next_y = path.pos.y + step_y;
+
+        if(next_x < 0 || next_x >= day17_dims.x || next_y < 0 || next_y >= day17_dims.y)
+          continue;
+
+        if (day17_map[next_x][next_y] == '#') { // There's another point
+          PossiblePath next_path = path;
+          Point next_point(next_x, next_y);
+
+          next_path.points.push_back(next_point);
+          next_path.pos = next_point;
+
+          bool visited_point = std::find(path.points.begin(), path.points.end(), next_point) != path.points.end();
+
+          if (td == path.dir) { // In the same direction
+            next_path.num_steps++;
+            num_steps++;
+            day17_kept_paths.push_back(next_path);
+          }
+          else { // We took a turn
+            if (path.num_steps > 0) // The first turn might have no steps, don't save it
+              next_path.steps.push_back(to_string(path.num_steps));
+
+            next_path.dir = td;
+            next_path.num_steps = 1;
+            next_path.steps.push_back(td == left_turns[path.dir] ? "L" : "R");
+
+            num_steps++;
+
+            day17_kept_paths.push_back(next_path);
+          }
+          break;
+        }
+      }
+
+      if (num_steps == 0) {
+        // We've reached the end of the line and can step no more; this is a potential path
+        if (path.points.size() >= day17_total_points) {
+          path.steps.push_back(to_string(path.num_steps));
+          printf("Adding path with %d steps to full paths list\n", path.steps.size());
+          day17_fullpaths.push_back(path);
+          return 0;
+        } else {
+          printf("Rejecting path with only %lu of %d necessary points\n", path.points.size(), day17_total_points);
+        }
+      } else {
+        total_steps ++;
+      }
+    }
+
+    day17_paths.clear();
+    day17_paths = day17_kept_paths;
+    day17_kept_paths.clear();
+
+    return total_steps;
+  }
+
+  void day17_seek_routes() {
+    PossiblePath path;
+    Point start;
+
+    for (int x = 0; x < day17_dims.x - 1; x++) {
+      for (int y = 0; y < day17_dims.y - 1; y++) {
+        if (day17_map[x][y] == '^' || day17_map[x][y] == 'v' || day17_map[x][y] == '<' || day17_map[x][y] == '>') {
+          start.x = x;
+          start.y = y;
+        }
+      }
+    }
+
+    path.pos = start;
+
+    switch(day17_map[start.x][start.y]) {
+      case '^':
+        path.dir = NORTH;
+        break;
+      case '>':
+        path.dir = EAST;
+        break;
+      case '<':
+        path.dir = WEST;
+        break;
+      case 'v':
+        path.dir = SOUTH;
+        break;
+    }
+
+    path.points.push_back(start);
+    day17_paths.push_back(path);
+  }
+
+  void day17_compress_steps(vector<string> steps) {
+    string full = "", main = "", a = "", b = "", c = "";
+
+    for(auto &step: steps)
+      full += step + ",";
+
+    full.resize(full.length() - 1);
+    main = full;
+
+    // Search for substrings going downwards from 20 characters
+    // to the smallest substring that starts on a turn and doesn't en d on a turn
+    for(int j = 20; j > 1; j--) {
+      for(int i = 0; i + j < full.size(); i++) {
+        string s = full.substr(i, j);
+
+        // Drop leading numbers or commas: always start on a turn
+        while (s[0] == ',' || (s[0] - '0' < 10)) s.erase(0, 1);
+
+        // Drop trailing commas or turns: always end on a step length
+        while(s.back() == ',' || s.back() == 'L' || s.back() == 'R')
+         s.resize(s.length() - 1);
+
+        if (s == "") {
+          // We've exhausted our options, and are done
+          day17_compressed_command[0] = main;
+          day17_compressed_command[1] = a;
+          day17_compressed_command[2] = b;
+          day17_compressed_command[3] = c;
+
+          return;
+        }
+        // Search for patterns starting with half of the length which is the longest duplicatable string;
+        // Take a step down and try with one less symbol each time;
+        int first = main.find(s);
+
+        if (first != string::npos && main.find(s, first + 1) != string::npos) {
+          // found a duplicate! put it in a register and replace all occurrences with that string
+          // in the main
+          int idx;
+
+          while((idx = main.find(s, 0)) != string::npos) {
+
+            if (a == "" || a == s) {
+              a = s;
+              main.replace(idx, a.size(), "A");
+            }
+            else if (b == "" || b == s) {
+              b = s;
+              main.replace(idx, b.size(), "B");
+            }
+            else if (c == "" || c == s) {
+              c = s;
+              main.replace(idx, c.size(), "C");
+            } 
+            else {
+              // We ran out of replacement strings. Bad news.
+              error_state = "Failed to find sufficient replacement strings!";
+              return;
+            }
+          }
+          i = 0;
+        }
+      }
+    }
+
+  }
+
+  void day17_init() {
+    parse_program();
+    day17_program = parsed_program;
+
+    IntcodeProgram p;
+    p.program = day17_program;
+
+    intcode_processor(&p, 0);
+
+    int width = 0, height = 0, output_column = 0;
+
+    for(auto &o: p.result) {
+      if (output_column == 0) {
+        printf("%02d. ", height);
+      }
+      putc(o, stdout);
+      if(o != '\n' && height == 0)
+        width++;
+
+      if (o == '\n' && output_column > 0) {
+        output_column = 0;
+        height++;
+      } else {
+        output_column++;
+      }
+    }
+
+    day17_map = new char*[width];
+
+    int x = 0, y = 0;
+
+    for (x = 0; x < width; x++)
+      day17_map[x] = new char[height];
+
+    x = 0;
+
+    for(auto &o: p.result) {
+      if(o == '\n') {
+        y++;
+        x = 0;
+      }
+      else day17_map[x++][y] = o;
+    }
+
+    day17_dims.x = width;
+    day17_dims.y = height;
+  }
+
+  int day17_scale = 7;
+  Point day17_offset = {50, 50};
+
+  void day17_draw_map() {
+    for (int x = 0; x < day17_dims.x; x++) {
+      for (int y = 0; y < day17_dims.y; y++) {
+        olc::Pixel color(64, 64, 64, 255);
+        switch (day17_map[x][y]) {
+          case '#':
+            color = olc::Pixel(128, 128, 255, 255);
+            break;
+          case '^':
+          case '>':
+          case '<':
+          case 'v':
+            color = olc::RED;
+            break;
+        }
+
+        FillRect(
+          olc::vi2d(x * day17_scale + day17_offset.x, y * day17_scale + day17_offset.y), 
+          olc::vi2d(day17_scale, day17_scale), 
+          color
+        ); 
+      }
+    }
+    if(day17_message.size() > 0) {
+      DrawStringDecal(olc::vi2d(offset.x, offset.y), day17_message);
+    }
+  }
+
+  void day17_munge_map_results() {
+    int dims = (day17_dims.x + 1) * day17_dims.y + 1;
+
+    if (day17_intcode.result[0] == '\n')
+      day17_intcode.result.erase(day17_intcode.result.begin());
+
+    for(int r = 0; r < dims; r++) {
+      int x = r % (day17_dims.x + 1);
+      int y = r / (day17_dims.x + 1);
+
+      if (day17_intcode.result[r] != '\n')
+        day17_map[x][y] = day17_intcode.result[r];
+    }
+
+    day17_intcode.result.erase(day17_intcode.result.begin(), day17_intcode.result.begin() + dims);
+  }
+
+  void day17_munge_message() {
+    string message = "";
+    
+    for (int i = 0; i < day17_intcode.result.size(); i++) {
+      if (day17_intcode.result[i] == 10)
+        break;
+
+      message += (char) day17_intcode.result[i];
+    }
+
+    if (message.size() > 0) {
+      cout << "Bot message: " << message << "\n";
+    }
+
+    day17_intcode.result.erase(day17_intcode.result.begin(), day17_intcode.result.begin() + message.size() + 1);
+
+    day17_message = message;
+  }
+
+  string day17() {
+    if (day17_alignment_parameter_sum == 0) {
+      for (int x = 0; x < day17_dims.x - 1; x++) {
+        for (int y = 0; y < day17_dims.y - 1; y++) {
+          if (x > 0 && x < day17_dims.x - 1 && y > 0 && y < day17_dims.y - 1 && day17_map[x][y] == '#') {
+            day17_total_points++;
+
+            if (
+                day17_map[x-1][y] == '#' && day17_map[x+1][y] == '#' &&
+                day17_map[x][y-1] == '#' && day17_map[x][y+1] == '#'
+            )
+              day17_alignment_parameter_sum += x * y;
+          } 
+        }
+      }
+
+      printf("Part 1: %d\n", day17_alignment_parameter_sum);
+    }
+    DrawStringDecal(olc::vf2d(10, 10), "Sum of alignment parameters: " + to_string(day17_alignment_parameter_sum));
+
+    if(day17_paths.size() == 0) {
+      day17_seek_routes();
+    }
+
+    int steps_taken;
+    if (day17_paths[0].points.size() < day_time * day17_speed) {
+      steps_taken = day17_route_step();
+    } else {
+      steps_taken = 1;
+    }
+
+    for(int pidx = 0; pidx < day17_paths.size(); pidx++) {
+      auto p = day17_paths[pidx];
+      int alpha = 255; // max((int) (255 / day17_paths.size()), 1);
+      for (auto &point: p.points) {
+        FillRect(olc::vi2d(point.x * day17_scale + day17_offset.x, point.y * day17_scale + day17_offset.y), olc::vi2d(day17_scale, day17_scale), olc::Pixel(0, 128, 128, alpha));
+      }
+      olc::vi2d pos = olc::vi2d(p.pos.x * day17_scale + day17_offset.x, p.pos.y * day17_scale + day17_offset.y);
+      FillRect(pos, olc::vi2d(day17_scale, day17_scale), olc::Pixel(0, 255, 128, alpha));
+      DrawStringDecal(pos, to_string(pidx));
+    }
+
+    if (steps_taken == 0 && day17_robot_running == false) {
+      for(int path_idx = 0; path_idx < day17_fullpaths.size(); path_idx++) {
+        PossiblePath p = day17_fullpaths[path_idx];
+
+        printf("Path %d: ", path_idx);
+
+        for (auto &s: p.steps) {
+          printf("%s,", s.c_str());
+        }
+
+        printf("\n");
+
+        day17_compress_steps(p.steps);
+        day17_robot_running = true;
+
+        day17_intcode.program = day17_program;
+        day17_intcode.program[0] = 2;
+        day17_intcode.result.clear();
+
+        for(int i = 0; i < 4; i++) {
+          string command = day17_compressed_command[i];
+          for (int j = 0; j < command.size(); j++) {
+            intcode_processor(&day17_intcode, (memtype) command[j]);
+          }
+          if (i == 0) day17_munge_map_results();
+          day17_munge_message();
+          intcode_processor(&day17_intcode, (memtype) '\n');
+        }
+        day17_munge_message();
+        intcode_processor(&day17_intcode, (memtype) is_visual ? 'y' : 'n');
+        intcode_processor(&day17_intcode, '\n');
+      }
+    }
+
+    memtype result = 0;
+
+    if (day17_robot_running) {
+      if (is_visual && day17_intcode.result.size() > 1) {
+        // We'll have a bunch of output frames: display them one-by-one
+        day17_munge_map_results();
+        day17_draw_map();
+      }
+
+      if (day17_intcode.result.size() == 1) {
+        result = day17_intcode.result[0];
+        day_complete = true;
+
+        printf("There's a result! %lld", result);
+      }
+    }
+
+    return (
+      "\nPart1: " + to_string(day17_alignment_parameter_sum) + "\n"
+      + "potential paths: " + to_string(day17_paths.size()) + "\n"
+      + "current length: " + to_string(day17_paths[0].points.size()) + "\n"
+      + "found paths: " + to_string(day17_fullpaths.size()) + "\n"
+      + "result: " + to_string(result)
+    );
+  }
+
   int8_t current_day = -1;
   float day_time = 0;
   bool day_complete = false;
@@ -2162,7 +2590,7 @@ public:
     &Advent2019::day1,  &Advent2019::day2,  &Advent2019::day3,  &Advent2019::day4,  &Advent2019::day5,
     &Advent2019::day6,  &Advent2019::day7,  &Advent2019::day8,  &Advent2019::day9,  &Advent2019::day10,
     &Advent2019::day11, &Advent2019::day12, &Advent2019::day13, &Advent2019::day14, &Advent2019::day15,
-    &Advent2019::day16
+    &Advent2019::day16, &Advent2019::day17
   } {
     selected_day = _selected_day;
 
@@ -2219,6 +2647,8 @@ public:
     if(current_day == 15)
       day15_init();
 
+    if(current_day == 17)
+      day17_init();
     day_time = 0;
     day_complete = false;
   }
@@ -2307,8 +2737,9 @@ public:
         string result = (this->*func)();
         //cout << "Computed!\n";
 
+        results[current_day] = result;
+
         if (day_complete) {
-          results[current_day] = result;
           cout << result << "\n";
 
           if (selected_day == -1) {
